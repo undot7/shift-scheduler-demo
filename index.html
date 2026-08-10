@@ -166,6 +166,15 @@
   table.grid .name-col.clk{cursor:pointer;}
   table.grid .name-col.clk:hover{background:#f5f8ff;}
   .name-col .gear{display:block; color:var(--muted); font-size:9px;}
+  /* スタッフの「店舗全体」ビュー(読み取り専用)。タップしても編集モーダルは開かない */
+  table.grid td.cell.ro{cursor:default;}
+  table.grid td.cell.ro:hover{background:var(--card);}
+  table.grid tr.me-row td.cell, table.grid tr.me-row td.cell.ro:hover{background:#eff4ff;}
+  table.grid tr.me-row .name-col{background:#e2ebff;}
+  .me-tag{
+    display:inline-block; background:var(--accent); color:#fff; border-radius:4px;
+    padding:0 4px; margin-left:3px; font-size:8.5px; font-weight:700; vertical-align:middle;
+  }
   /* 個人設定 */
   .us-row{display:flex; align-items:center; gap:8px; padding:8px 2px; border-bottom:1px solid var(--line); cursor:pointer;}
   .us-row:last-child{border-bottom:none;}
@@ -312,6 +321,8 @@
     .sh-chip .pr-time{display:block;}
     .rq{color:#4b5260; font-size:5.5pt;}
     .fw, .fw-chip, .name-col .gear{display:none !important;}
+    /* 自分の行の目印。白黒印刷でも読めるよう地色でなく枠線と文字で示す */
+    .me-tag{background:#fff !important; color:var(--ink) !important; border:.3pt solid #3b414d; font-size:5pt; padding:0 .6pt;}
     /* 公休/有給も白地+黒文字。枠線の実線/点線と文字で区別する(色に頼らない) */
     .off-chip{
       background:#fff !important; color:#3b414d !important;
@@ -390,6 +401,9 @@ let state = null;
 let view  = null; // {role:'owner'} | {role:'manager',storeId} | {role:'staff',userId} | null
 const ui = {
   staffTab:"shift", staffCalOffset:0, mgrMonthOffset:1, mgrScreen:"grid",
+  // スタッフの「シフト」タブ内の表示切替 "mine"(自分のシフト) | "store"(店舗全体)。
+  // localStorageには持たない(保存データの構造を変えないため。リロードで "mine" に戻る)
+  staffShiftView:"mine",
   ownerStore:null, condDraft:null,
   ownerScreen:"dash",   // "dash" | "settings"(共通設定)
   setDraft:null         // 共通設定の編集中データ(保存するまで state に反映しない)
@@ -889,8 +903,10 @@ function render(){
     html = hdrHtml() + `<div class="wrap no-tab">${body}</div>`;
   }
   app.innerHTML = html;
-  // 個人分はA4縦、月間シフト表はA4横（画面からCtrl+Pされた場合にも合わせる）
-  setPageSize(view && view.role === "staff" ? "portrait" : "landscape");
+  // 個人分はA4縦、月間シフト表はA4横（画面からCtrl+Pされた場合にも合わせる）。
+  // スタッフでも「店舗全体」ビューは月間シフト表なのでA4横にする
+  const staffStoreView = !!view && view.role === "staff" && ui.staffTab === "shift" && ui.staffShiftView === "store";
+  setPageSize(view && view.role === "staff" && !staffStoreView ? "portrait" : "landscape");
 }
 
 function vpLabel(){
@@ -972,6 +988,15 @@ function calHtml(y, m, cellFn, onclickName){
 }
 
 function staffShiftTab(me){
+  // 下部タブは増やさず、タブ内のセグメント切替で「自分のシフト / 店舗全体」を出し分ける
+  const seg = `<div class="seg" style="margin-bottom:10px;">
+    <button class="${ui.staffShiftView==='store'?'':'on'}" onclick="A.staffShiftView('mine')">自分のシフト</button>
+    <button class="${ui.staffShiftView==='store'?'on':''}" onclick="A.staffShiftView('store')">店舗全体</button>
+  </div>`;
+  // 店舗全体は店長の月間シフト表を読み取り専用(公開済みのみ)で再利用する
+  if(ui.staffShiftView === "store")
+    return seg + managerHtml(me.storeId, false, { meId: me.id, monthOffset: ui.staffCalOffset });
+
   const [y, m] = monthAt(ui.staffCalOffset);
   const st = storeOf(me.storeId);
   // 公開済みの月は「割当のない日=公休」。未公開の月は空欄のまま(まだ休みが確定していない)
@@ -989,7 +1014,7 @@ function staffShiftTab(me){
       return `<span class="chip" style="background:${p.color}; --c:${p.color}">${esc(p.name)}<small class="pr-time">${sh.start}-${sh.end}</small></span>${leaveChip}`;
     return `<span class="chip" style="background:${st.color}; --c:${st.color}">${sh.start}-${sh.end}</span>${leaveChip}`;
   };
-  return `<div class="card">
+  return seg + `<div class="card">
     <div class="print-head">
       <div class="ph-ttl">${esc(me.name)}さんのシフト　${y}年${m+1}月</div>
       <div class="ph-meta">${esc(st.name)}　／　出力日時: <span id="print-stamp">${stampStr()}</span>　／　公開済みのシフトのみ記載</div>
@@ -1054,10 +1079,14 @@ function staffNtfTab(me){
 }
 
 /* ---------------- 店長画面(オーナーの店舗ドリルインと共用) ---------------- */
-function managerHtml(storeId, fromOwner){
-  if(ui.mgrScreen === "conditions") return condHtml(storeId, fromOwner);
+/* ro(第3引数): スタッフの「店舗全体」ビュー = 読み取り専用 { meId, monthOffset }
+   - 公開済み(status:"published")のシフトだけを描く。下書きは1件も出さない
+   - セルは編集不可。自動生成・公開・条件設定・CSV・扶養(給与)情報は一切出さない
+   ※描画を作り直すとA4横1枚に収まる実測が無効になるので、必ずこの関数を再利用する */
+function managerHtml(storeId, fromOwner, ro){
+  if(!ro && ui.mgrScreen === "conditions") return condHtml(storeId, fromOwner);
   const st = storeOf(storeId);
-  const [y, m] = monthAt(ui.mgrMonthOffset);
+  const [y, m] = monthAt(ro ? ro.monthOffset : ui.mgrMonthOffset);
   const ym = ymKey(y, m);
   const mem = members(storeId);
   const nDays = dim(y, m);
@@ -1071,24 +1100,34 @@ function managerHtml(storeId, fromOwner){
     : `<span class="st-chip st-none">未作成</span>`;
   // 印刷時の状態表記。下書きは確定版との取り違えを防ぐため紙面に必ず明示する
   const prState = hasDraft ? "下書き" : hasPub ? "公開済み" : "未作成";
+  // 読み取り専用ビューは「公開済みの月」だけ中身を出す(未公開の月は表そのものを出さない)
+  const roPub = !!ro && isPublishedMonth(storeId, ym);
   // シフト作成済み(自動生成/公開を行った)の月だけ「割当なし=公休」と表示する。
   // シフト件数では判定しない(手動で1セル入れただけの月が完成シフト表に見えてしまうため)
-  const made = isMadeMonth(storeId, ym);
+  const made = ro ? roPub : isMadeMonth(storeId, ym);
 
-  let head = `<th class="name-col" data-pstate="${prState}">スタッフ</th>`;
+  let head = `<th class="name-col" data-pstate="${ro ? (roPub ? "公開済み" : "") : prState}">スタッフ</th>`;
   for(let d=1; d<=nDays; d++){
     const ds = dstr(y, m, d); const g = parseD(ds).getDay();
     head += `<th class="${ds===tds?'today':''}">${d}<span class="dw ${g===0?'sun':g===6?'sat':''}">${DOWJ[g]}</span></th>`;
   }
 
   const rows = mem.map(u => {
+    const isMe = !!ro && u.id === ro.meId;
     // 扶養内のスタッフは、この月の見込みで上限を超えそうなら名前の下に警告を出す(表示のみ・自動生成の制約には入れていない)
-    const fw = fuyouTarget(u) && fuyouOf(u, y, m).over ? `<small class="fw">⚠扶養超過見込み</small>` : "";
-    let tds2 = `<td class="name-col clk" onclick="A.openUser(${u.id})"><b>${esc(u.name)}</b><small>${esc(u.type)}${u.weeklyMaxDays?`・週${u.weeklyMaxDays}日まで`:""}</small>${fw}<small class="gear">⚙ 個人設定</small></td>`;
+    // ※給与に関わる情報なので、読み取り専用ビュー(他のスタッフが見る)には出さない
+    const fw = (!ro && fuyouTarget(u) && fuyouOf(u, y, m).over) ? `<small class="fw">⚠扶養超過見込み</small>` : "";
+    let tds2 = ro
+      ? `<td class="name-col"><b>${esc(u.name)}${isMe?`<span class="me-tag">あなた</span>`:""}</b><small>${esc(u.type)}</small></td>`
+      : `<td class="name-col clk" onclick="A.openUser(${u.id})"><b>${esc(u.name)}</b><small>${esc(u.type)}${u.weeklyMaxDays?`・週${u.weeklyMaxDays}日まで`:""}</small>${fw}<small class="gear">⚙ 個人設定</small></td>`;
     for(let d=1; d<=nDays; d++){
       const ds = dstr(y, m, d);
-      const sh = shiftAt(u.id, ds);
-      const rq = reqAt(u.id, ds);
+      let sh = shiftAt(u.id, ds);
+      // 読み取り専用ビューでは下書きを1件も見せない
+      // (公開済みの月に店長が後から入れた下書きも含めて落とす)
+      if(ro && sh && sh.status !== "published") sh = null;
+      // 未公開の月は希望(有給・希望休など)も見せない
+      const rq = (ro && !roPub) ? null : reqAt(u.id, ds);
       let inner = "", conflict = "";
       if(sh){
         const p = sh.patternId ? patternOf(sh.patternId) : null;
@@ -1100,15 +1139,17 @@ function managerHtml(storeId, fromOwner){
         }else{
           inner = `<span class="sh-chip free-sh${draftCls}" style="--c:${st.color}">${sh.start}<small>${sh.end}</small></span>`;
         }
-        if(rq && (rq.type === "day_off" || rq.type === "paid_leave")) conflict = " conflict";
+        // 希望と食い違う日の警告枠は店長向け。スタッフの閲覧ビューには出さない
+        if(!ro && rq && (rq.type === "day_off" || rq.type === "paid_leave")) conflict = " conflict";
       }else if(rq && rq.type === "paid_leave"){
         inner = `<span class="off-chip leave">有給</span>`;
       }else if(made){
         // 作成済みの月で割当がない日は、希望の有無にかかわらず「公休」。
         // 希望の文字(希望休/10:00-15:00 等)を残すと紙面で勤務日と誤読されるため必ず公休にする。
-        // 由来が分かる補助表示は画面のみ(印刷では .oc-sub を非表示)
+        // 由来が分かる補助表示は画面のみ(印刷では .oc-sub を非表示)。
+        // 店長向けの情報なので、スタッフの閲覧ビュー(ro)にも出さない
         let sub = "";
-        if(rq) sub = rq.type === "day_off"
+        if(rq && !ro) sub = rq.type === "day_off"
           ? `<small class="oc-sub">希望</small>`      // 希望休が通った日
           : `<small class="oc-sub">希望未反映</small>`; // 勤務希望を出したが割当がなかった日
         inner = `<span class="off-chip">公休${sub}</span>`;
@@ -1119,19 +1160,51 @@ function managerHtml(storeId, fromOwner){
         else if(rq.type === "pattern"){ const p = patternOf(rq.patternId); inner = `<span class="rq">${esc(p?p.name:"?")}<br>希望</span>`; }
         else inner = `<span class="rq">${anyLabel(storeId)}</span>`;
       }
-      tds2 += `<td class="cell${conflict}" onclick="A.openCell(${storeId},${u.id},'${ds}')">${inner}</td>`;
+      // 読み取り専用: onclickを付けない(セルをタップしても編集モーダルは開かない)
+      tds2 += ro
+        ? `<td class="cell ro">${inner}</td>`
+        : `<td class="cell${conflict}" onclick="A.openCell(${storeId},${u.id},'${ds}')">${inner}</td>`;
     }
-    return `<tr>${tds2}</tr>`;
+    return `<tr${isMe?` class="me-row"`:""}>${tds2}</tr>`;
   }).join("");
 
+  // 人員不足バッジ(tfoot)は店長向けの指標。スタッフの閲覧ビューには出さない
   let foot = "";
-  if(monthShifts.length){
+  if(!ro && monthShifts.length){
     foot = `<tfoot><tr><td class="name-col small muted">人員</td>`;
     for(let d=1; d<=nDays; d++){
       const ds = dstr(y, m, d);
       foot += `<td>${isShortDay(storeId, ds) ? `<span class="short-badge">⚠️不足</span>` : `<span class="muted">✓</span>`}</td>`;
     }
     foot += `</tr></tfoot>`;
+  }
+
+  const gridHtml = `<div class="grid-wrap">
+    <table class="grid"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody>${foot}</table>
+  </div>`;
+
+  /* ----- スタッフの「店舗全体」ビュー(読み取り専用) ----- */
+  if(ro){
+    // 未公開の月は表も印刷見出しも出さない(下書きが紙に出る経路を作らない)
+    const roHead = roPub ? `<div class="print-head">
+      <div class="ph-ttl">${esc(st.name)}　${y}年${m+1}月 シフト表</div>
+      <div class="ph-meta">${esc(state.tenant.name)}　／　出力日時: <span id="print-stamp">${stampStr()}</span>　／　公開済みのシフトのみ記載</div>
+    </div>` : "";
+    return `
+    ${roHead}
+    <div class="mgr-toolbar">
+      <button class="btn btn-sm" onclick="A.staffCal(-1)">‹ 前月</button>
+      <span style="font-weight:700;">${y}年${m+1}月</span>
+      <button class="btn btn-sm" onclick="A.staffCal(1)">翌月 ›</button>
+      <span style="flex:1"></span>
+      ${roPub ? `<button class="btn btn-sm" onclick="A.printSheet()">🖨 全体を印刷</button>` : ""}
+    </div>
+    ${roPub ? gridHtml
+      : `<div class="card"><p class="small muted" style="margin:0;">
+          ${y}年${m+1}月のシフトはまだ公開されていません。公開されると通知でお知らせします。</p></div>`}
+    ${roPub ? `<p class="small muted no-print" style="margin-top:8px;">
+      ${esc(st.name)}の公開済みシフトです（閲覧のみ・編集はできません）。
+      青い行があなたのシフトです。横にスクロールすると月末まで見られます。</p>` : ""}`;
   }
 
   const overN = fuyouOverMembers(storeId, y, m).length;
@@ -1170,9 +1243,7 @@ function managerHtml(storeId, fromOwner){
     <button class="btn btn-sm" onclick="A.exportCsv(${storeId})">⬇ CSVダウンロード</button>
     ${nextBtns}
   </div>
-  <div class="grid-wrap">
-    <table class="grid"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody>${foot}</table>
-  </div>
+  ${gridHtml}
   <p class="small muted no-print" style="margin-top:8px;">
     セルをタップして手動入力・編集できます（スタッフ名をタップすると<b>個人設定</b>）。点線の枠は下書き（未公開）です。
     シフト表を作成すると、割当のない日は「公休」（希望休が通った日は「公休/希望」）、有給の日は「有給」と表示されます
@@ -1433,7 +1504,7 @@ const A = {
     if(role === "owner") view = { role:"owner" };
     else if(role === "manager") view = { role:"manager", storeId:id };
     else view = { role:"staff", userId:id };
-    ui.staffTab = "shift"; ui.staffCalOffset = 0;
+    ui.staffTab = "shift"; ui.staffCalOffset = 0; ui.staffShiftView = "mine";
     ui.mgrMonthOffset = 1; ui.mgrScreen = "grid"; ui.ownerStore = null;
     ui.ownerScreen = "dash"; ui.setDraft = null; ui.condDraft = null;
     saveView(); render();
@@ -1442,6 +1513,8 @@ const A = {
 
   /* ----- スタッフ ----- */
   staffTab(t){ ui.staffTab = t; render(); },
+  // 「自分のシフト / 店舗全体」の切替。保存はしない(リロードで自分のシフトに戻る)
+  staffShiftView(v){ ui.staffShiftView = v; render(); },
   staffCal(d){ ui.staffCalOffset += d; render(); },
   staffDay(ds){
     const me = userOf(view.userId);
@@ -2020,7 +2093,7 @@ const A = {
   /* ----- 設定 ----- */
   openSettings(){
     openModal(`${mdlHead("設定")}
-      <p class="small muted">シフト作成システム 営業デモ版 v1.4<br>
+      <p class="small muted">シフト作成システム 営業デモ版 v1.5<br>
       データはこの端末のブラウザ内（localStorage）にのみ保存されます。サーバー送信はありません。</p>
       <div class="opt-grid">
         <button class="btn btn-lg btn-danger" onclick="A.confirmReset()">🔄 デモデータにリセット</button>
