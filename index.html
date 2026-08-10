@@ -359,8 +359,10 @@
 //  v2: 希望の種別に paid_leave(有給) を追加
 //  v3: 共通設定(settings)・パターンの全店共通化(stores[].patternIds)・createdMonths を追加
 //  v4: 休憩を2層に統一(settings.breakTiers / 雇用形態の既定休憩を廃止)・扶養設定(時給/累計/扶養区分)を追加
-const STATE_KEY = "ssd:state:v4";
-const OLD_STATE_KEYS = ["ssd:state:v1", "ssd:state:v2", "ssd:state:v3"];   // 残っていても使わないので掃除する
+//  v5: 自由時間制の生成が終了時刻を閉店にスナップするようになり、シード済みシフトの時刻が変わった
+//      (旧v4のstateをそのまま読むと、シード済みの今月分が古い時刻のまま残り人員不足バッジが出る)
+const STATE_KEY = "ssd:state:v5";
+const OLD_STATE_KEYS = ["ssd:state:v1", "ssd:state:v2", "ssd:state:v3", "ssd:state:v4"];   // 残っていても使わないので掃除する
 const VIEW_KEY  = "ssd:view:v1";
 const MAX_DAY_OFF = 3;   // 希望休の上限(月・有給はこの枠に含めない)
 
@@ -414,7 +416,7 @@ function seedState(){
     return u;
   });
   const s = {
-    version: 4, seq: 1000,
+    version: 5, seq: 1000,
     tenant: DEMO_DATA.tenant,
     stores: JSON.parse(JSON.stringify(DEMO_DATA.stores)),
     patterns: JSON.parse(JSON.stringify(DEMO_DATA.patterns)),
@@ -453,7 +455,7 @@ function loadState(){
     const raw = localStorage.getItem(STATE_KEY);
     if(raw){
       const s = JSON.parse(raw);
-      if(s && s.version === 4) return s;
+      if(s && s.version === 5) return s;
     }
   }catch(e){ console.error("state load failed, reseeding", e); }
   const s = seedState();
@@ -575,8 +577,9 @@ function monthEarnOf(u, y, m){
     .reduce((a, s) => a + workMinOf(s) / 60 * u.wage, 0);
   // 有給の日も賃金は発生する。有給は shifts でなく requests(paid_leave) に持つので別に足す。
   // その日の時刻は決まっていないため、雇用形態の既定「実働」時間 × 時給 で見込む
+  // 同じ日にシフトが入っている場合は上のシフト分で計上済みなので足さない(二重計上の防止)
   const leaveYen = state.requests
-    .filter(r => r.userId === u.id && r.type === "paid_leave" && ymOf(r.date) === ym)
+    .filter(r => r.userId === u.id && r.type === "paid_leave" && ymOf(r.date) === ym && !shiftAt(u.id, r.date))
     .reduce(a => a + (empDefault(u).workMin || 0) / 60 * u.wage, 0);
   return shiftYen + leaveYen;
 }
@@ -1337,7 +1340,7 @@ function commonSettingsHtml(){
       <span class="pc" style="background:${p.color}"></span>
       <div class="pi">
         <b>${esc(p.name)}</b>
-        <small>${p.start}〜${p.end}（${p.breakMin != null ? `休憩${br}分・手動` : `休憩${br}分・自動`}・実働${hmLabel(span - br)}）</small>
+        <small>${p.start}〜${p.end}（${p.breakMin != null ? `休憩${br}分・手動` : `休憩${br}分・自動`}・実働${hmLabel(Math.max(0, span - br))}）</small>
         <small>使用店舗: ${used.length ? esc(used.join("・")) : "なし"}</small>
       </div>
       <button class="btn btn-sm" onclick="A.editPattern(${p.id})">編集</button>
@@ -1593,7 +1596,10 @@ const A = {
     // 既定値: 既存シフト → 店舗のパターン(パターン制) → 10:00＋雇用形態の既定(拘束)
     const usePat = st.mode === "pattern" && pats.length;
     const defS = sh ? sh.start : (usePat ? pats[0].start : "10:00");
-    const defE = sh ? sh.end : (usePat ? pats[0].end : mt(Math.min(1440, tm("10:00") + spanMinIn(state, u))));
+    // timeSelは30分刻み。選択肢に無い時刻(例: 拘束8時間45分の18:45)を既定にすると
+    // セレクトが先頭の06:00を表示してしまい保存できないので、30分単位に切り上げる
+    const snap30 = x => Math.min(1440, Math.ceil(x / 30) * 30);
+    const defE = sh ? sh.end : (usePat ? pats[0].end : mt(snap30(tm("10:00") + spanMinIn(state, u))));
     body += `<div class="frow" style="margin-top:6px;"><label style="min-width:0;">時刻指定</label>
       ${timeSel("", defS).replace("<select", '<select id="sh-start"')} 〜 ${timeSel("", defE).replace("<select", '<select id="sh-end"')}
     </div>
@@ -1972,7 +1978,15 @@ const A = {
         if(prev != null && t.spanMaxMin <= prev){ toast("休憩ルールの拘束時間は上から順に長くしてください"); return; }
         if(t.breakMin >= t.spanMaxMin){ toast(`休憩ルール${i+1}段目は休憩が拘束時間以上です`); return; }
       }
+      // 短い段のほうが休憩が長いと、拘束から実働を逆算する側と休憩を決める側が食い違い、
+      // 実働が既定より短い(0分に近い)コマができる。休憩は拘束が長い段ほど長くする
+      if(i > 0 && t.breakMin < tiers[i-1].breakMin){
+        toast("休憩ルールの休憩は、拘束が長い段ほど長く（または同じに）してください"); return;
+      }
     }
+    // 段階制ルールを変えると既存パターンの実働が0以下になることがある(自動休憩のパターン)
+    const badPat = d.patterns.find(p => (tm(p.end) - tm(p.start)) - patBreakMin(p, tiers) <= 0);
+    if(badPat){ toast(`パターン「${badPat.name}」は休憩が拘束時間以上になります（実働が0以下）`); return; }
     // パターン制の店舗はパターンが0だとシフトを組めない
     const badStore = d.stores.find(s => s.mode === "pattern" && !s.patternIds.length);
     if(badStore){ toast(`${badStore.name}（パターン制）は使用パターンを1つ以上選んでください`); return; }
