@@ -114,6 +114,7 @@
     color:#fff; margin-top:2px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .chip.ghost{background:var(--gray-chip); color:#767e8c; font-weight:600;}
+  .chip.leave{background:#eef3ff; color:#3559c7; border:1px solid #c3d3ff; font-weight:700;}
 
   /* ---------- manager grid ---------- */
   .mgr-toolbar{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;}
@@ -148,10 +149,31 @@
   .sh-chip.free-sh{background:#5d6b82;}
   .sh-chip.draft{opacity:.72; outline:2px dashed rgba(0,0,0,.25); outline-offset:-2px;}
   .rq{font-size:9px; color:#8b93a2; line-height:1.25; padding:2px 1px;}
-  .rq.off{display:block; margin:2px; background:var(--gray-chip); color:#767e8c; border-radius:6px; padding:3px 2px; font-weight:700; font-size:9.5px;}
+  /* 休みは空欄にせず必ず文字で示す(公休/有給)。白黒印刷でも色に頼らず判別できるようにする */
+  .off-chip{
+    display:block; margin:2px; border-radius:6px; padding:3px 2px;
+    background:var(--gray-chip); color:#767e8c; font-weight:700; font-size:9.5px; line-height:1.25;
+  }
+  .off-chip.leave{background:#eef3ff; color:#3559c7; border:1px solid #c3d3ff;}
+  /* 「希望休由来の公休」だと店長が分かる補助表示。印刷では二重表記になるので出さない */
+  .off-chip .oc-sub{display:block; font-weight:600; font-size:8px; opacity:.85;}
   .cell.conflict{outline:2px solid var(--danger); outline-offset:-2px;}
   table.grid tfoot td{background:#f7f8fb; text-align:center; font-size:9px; height:24px;}
   .short-badge{color:#c0392b; font-weight:700; font-size:9px; white-space:nowrap;}
+  /* 扶養の超過見込み。給与情報なので紙には出さない(印刷時は非表示) */
+  .fw{display:block; color:#c0392b; font-weight:700; font-size:9px; line-height:1.2;}
+  .fw-chip{background:#fdeaea; color:#c0392b; font-size:11px; font-weight:700; border-radius:999px; padding:3px 9px;}
+  table.grid .name-col.clk{cursor:pointer;}
+  table.grid .name-col.clk:hover{background:#f5f8ff;}
+  .name-col .gear{display:block; color:var(--muted); font-size:9px;}
+  /* 個人設定 */
+  .us-row{display:flex; align-items:center; gap:8px; padding:8px 2px; border-bottom:1px solid var(--line); cursor:pointer;}
+  .us-row:last-child{border-bottom:none;}
+  .us-row .ui2{flex:1; min-width:0;}
+  .us-row .ui2 b{font-size:13.5px;}
+  .us-row .ui2 small{display:block; color:var(--muted); font-size:11px;}
+  .fuyou-box{background:#f7f8fb; border-radius:8px; padding:8px 10px; font-size:12.5px; margin:2px 0 10px;}
+  .fuyou-box .ov{color:var(--danger); font-weight:700;}
 
   /* ---------- owner ---------- */
   .own-card{display:flex; align-items:center; gap:12px; cursor:pointer;}
@@ -179,6 +201,28 @@
   }
   .frow input[type=number]{width:76px;}
   .band-row{display:flex; align-items:center; gap:6px; margin-bottom:8px; flex-wrap:wrap;}
+  .frow input[type=text]{border:1px solid var(--line); border-radius:8px; padding:7px 8px; font-size:14px; font-family:inherit; width:11em;}
+  .frow input[type=color]{border:1px solid var(--line); border-radius:8px; padding:2px; width:52px; height:34px; background:#fff;}
+
+  /* ---------- 共通設定(パターン一覧・店舗別の使用パターン) ---------- */
+  .pat-row{display:flex; align-items:center; gap:9px; padding:8px 2px; border-bottom:1px solid var(--line);}
+  .pat-row:last-of-type{border-bottom:none;}
+  .pat-row .pc{width:8px; align-self:stretch; border-radius:4px; flex:none;}
+  .pat-row .pi{flex:1; min-width:0;}
+  .pat-row .pi b{font-size:13.5px;}
+  .pat-row .pi small{display:block; color:var(--muted); font-size:11px;}
+  .chk-grid{display:flex; flex-wrap:wrap; gap:6px;}
+  .chk{
+    display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line);
+    border-radius:999px; padding:5px 11px 5px 8px; font-size:12.5px; font-weight:600; background:#fff; cursor:pointer;
+  }
+  .chk input{margin:0;}
+  .set-store{border:1px solid var(--line); border-radius:10px; padding:9px 10px; margin-bottom:8px;}
+  .set-store .sn{font-weight:700; font-size:13.5px; margin-bottom:6px;}
+  /* 雇用形態の行は「実働○時間」「休憩○分」の単位で折り返す(数字と単位が離れないように) */
+  .emp-row label{min-width:4.5em;}
+  .emp-row .unit{display:inline-flex; align-items:center; gap:5px; white-space:nowrap;}
+  .emp-row input[type=number]{width:68px;}
 
   /* ---------- modal ---------- */
   .ovl{position:fixed; inset:0; background:rgba(25,30,45,.45); z-index:100; display:flex; align-items:flex-end; justify-content:center;}
@@ -207,7 +251,95 @@
   .req-list{margin-top:6px;}
   .req-item{display:flex; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px solid var(--line); font-size:13px;}
   .req-item:last-child{border-bottom:none;}
+
+  /* ---------- print(印刷) ---------- */
+  .pr-bar{display:flex; justify-content:flex-end; gap:8px; margin-top:10px;}
+  .print-head{display:none;}   /* 画面では出さず、印刷時のみ表示する見出し */
+  /* 画面では隠し、印刷時に時刻を併記する(白黒判読用)。
+     .sh-chip small より詳細度を高くしないと画面に出てしまうので子孫セレクタで書く */
+  .sh-chip .pr-time, .chip .pr-time{display:none;}
+
+  @media print{
+    html,body{background:#fff !important; print-color-adjust:exact; -webkit-print-color-adjust:exact;}
+    /* 画面操作用のUIは紙に出さない。
+       .cal-head は印刷見出し(.print-head)がある画面だけ消す。
+       希望提出タブには .print-head が無く、消すと月見出しまで紙面から欠落するため */
+    .hdr, .tabbar, .mgr-toolbar, .print-head ~ .cal-head, .pr-bar, .ovl, #toast,
+    .btn, .icon-btn, .seg, .no-print{display:none !important;}
+    .wrap, .wrap.no-tab{max-width:none; margin:0; padding:0;}
+    .card{border:none; box-shadow:none; border-radius:0; padding:0; margin:0;}
+    /* オーナーダッシュボードは店舗カードが密着すると区切りが分からなくなるので枠を残す */
+    .own-card{border:.3pt solid #98a0ac; margin-bottom:2mm; padding:2mm;}
+
+    /* 見出し: 店舗名/対象月/出力日時/下書きか公開済みか */
+    .print-head{display:block; margin:0 0 3mm;}
+    .print-head .ph-ttl{font-size:13pt; font-weight:700; line-height:1.35;}
+    .print-head .ph-draft{
+      display:inline-block; border:1.2pt solid var(--ink); border-radius:1.5mm;
+      padding:0 2mm; margin-right:2mm; font-size:11pt; font-weight:700;
+    }
+    .print-head .ph-meta{font-size:8.5pt; color:#333; margin-top:1mm;}
+
+    /* 月間シフト表: 行は途中で切らず、日付ヘッダーは各ページで繰り返す */
+    .grid-wrap{overflow:visible !important; border:none; border-radius:0;}
+    table.grid{width:100%; table-layout:fixed; font-size:6.5pt;}
+    table.grid thead{display:table-header-group;}
+    table.grid tfoot{display:table-footer-group;}
+    table.grid tr{break-inside:avoid; page-break-inside:avoid;}
+    table.grid th, table.grid td{border-right:.3pt solid #98a0ac; border-bottom:.3pt solid #98a0ac;}
+    table.grid thead th{position:static; min-width:0; padding:1pt 0; background:#eceff4; font-size:6pt;}
+    table.grid thead th.today{background:#eceff4;}
+    table.grid thead th .dw{font-size:5.5pt;}
+    table.grid .name-col{position:static; width:18mm; min-width:0; max-width:none; background:#fff; padding:1pt 1.5pt;}
+    table.grid thead .name-col{background:#eceff4;}
+    table.grid thead .name-col::after{content:attr(data-pstate); display:block; font-weight:700; font-size:5.5pt;}
+    table.grid .name-col b{font-size:7pt;}
+    table.grid .name-col small{font-size:5.5pt;}
+    table.grid td.cell{height:auto; min-width:0; padding:.5pt 0;}
+    table.grid tfoot td{height:auto; padding:1pt 0; font-size:5.5pt;}
+    .cell.conflict{outline-width:.6pt;}
+
+    /* 白黒コピーでも読めるよう地色は白・文字は黒。店舗色/パターン色は左の帯で残し、
+       パターン名と時刻を必ず併記する(色だけで早番/遅番を区別しない) */
+    .sh-chip{
+      background:#fff !important; color:var(--ink) !important; opacity:1 !important;
+      border:.3pt solid #b6bcc6; border-left:2pt solid var(--c,#5d6b82);
+      border-radius:2px; margin:.5pt; padding:.5pt 0; font-size:6pt; line-height:1.15;
+    }
+    .sh-chip small{font-size:5.5pt; opacity:1; color:#3b414d; font-weight:600;}
+    .sh-chip.draft{outline:.5pt dashed #555; outline-offset:-1pt;}
+    .sh-chip .sc-adj{display:none;}      /* 画面用の時刻調整表示(印刷はpr-timeに統一) */
+    .sh-chip .pr-time{display:block;}
+    .rq{color:#4b5260; font-size:5.5pt;}
+    .fw, .fw-chip, .name-col .gear{display:none !important;}
+    /* 公休/有給も白地+黒文字。枠線の実線/点線と文字で区別する(色に頼らない) */
+    .off-chip{
+      background:#fff !important; color:#3b414d !important;
+      border:.3pt dotted #98a0ac; border-radius:2px; margin:.5pt; padding:.5pt 0; font-size:6pt; line-height:1.15;
+    }
+    .off-chip.leave{border:.4pt solid #3b414d; font-weight:700;}
+    .off-chip .oc-sub{display:none;}
+
+    /* 個人分(スタッフのシフト確認カレンダー) */
+    .cal{gap:.8mm;}
+    .cal .dow{font-size:8.5pt;}
+    .cal .day{min-height:21mm; background:#fff; border:.3pt solid #98a0ac; border-radius:0; font-size:8pt; overflow:visible;}
+    .cal .day.blank{border:none;}
+    .cal .day.today{outline:none;}
+    .cal .day .dn{font-size:8.5pt;}
+    .chip{
+      background:#fff !important; color:var(--ink) !important;
+      border:.3pt solid #b6bcc6; border-left:2.4pt solid var(--c,#5d6b82);
+      border-radius:2px; font-size:8pt; padding:.3mm 1mm; white-space:normal; overflow:visible;
+    }
+    .chip .pr-time{display:block; font-size:7.5pt; font-weight:600; color:#3b414d;}
+    /* 個人分の公休/有給。シフトの色帯と紛れないよう左帯は付けない */
+    .chip.ghost{border:.3pt dotted #98a0ac; color:#3b414d !important;}
+    .chip.leave{border:.4pt solid #3b414d; color:#3b414d !important; font-weight:700;}
+  }
 </style>
+<!-- 用紙向きは印刷対象で切替える(月間シフト表=A4横 / 個人分=A4縦) -->
+<style id="page-style">@page{ size:A4 landscape; margin:10mm; }</style>
 </head>
 <body>
 <div id="app"></div>
@@ -223,8 +355,14 @@
      本格アルゴリズムに置き換える前提の仮実装
    ===================================================================== */
 
-const STATE_KEY = "ssd:state:v1";
+// 構造変更のたびにキーを上げて再シードさせる
+//  v2: 希望の種別に paid_leave(有給) を追加
+//  v3: 共通設定(settings)・パターンの全店共通化(stores[].patternIds)・createdMonths を追加
+//  v4: 休憩を2層に統一(settings.breakTiers / 雇用形態の既定休憩を廃止)・扶養設定(時給/累計/扶養区分)を追加
+const STATE_KEY = "ssd:state:v4";
+const OLD_STATE_KEYS = ["ssd:state:v1", "ssd:state:v2", "ssd:state:v3"];   // 残っていても使わないので掃除する
 const VIEW_KEY  = "ssd:view:v1";
+const MAX_DAY_OFF = 3;   // 希望休の上限(月・有給はこの枠に含めない)
 
 /* ---------------- date / time utils ---------------- */
 const DOWJ = ["日","月","火","水","木","金","土"];
@@ -241,13 +379,19 @@ const mt = x => `${pad(Math.floor(x/60))}:${pad(x%60)}`;
 const jdate = ds => { const d = parseD(ds); return `${d.getMonth()+1}月${d.getDate()}日(${DOWJ[d.getDay()]})`; };
 const ntfTime = iso => { const d = new Date(iso); return `${d.getMonth()+1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const todayStr = () => { const n = new Date(); return dstr(n.getFullYear(), n.getMonth(), n.getDate()); };
+const stampStr = () => { const d = new Date(); return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function monthAt(offset){ const n = new Date(); const d = new Date(n.getFullYear(), n.getMonth()+offset, 1); return [d.getFullYear(), d.getMonth()]; }
 
 /* ---------------- state ---------------- */
 let state = null;
 let view  = null; // {role:'owner'} | {role:'manager',storeId} | {role:'staff',userId} | null
-const ui = { staffTab:"shift", staffCalOffset:0, mgrMonthOffset:1, mgrScreen:"grid", ownerStore:null, condDraft:null };
+const ui = {
+  staffTab:"shift", staffCalOffset:0, mgrMonthOffset:1, mgrScreen:"grid",
+  ownerStore:null, condDraft:null,
+  ownerScreen:"dash",   // "dash" | "settings"(共通設定)
+  setDraft:null         // 共通設定の編集中データ(保存するまで state に反映しない)
+};
 
 function saveState(){
   try{ localStorage.setItem(STATE_KEY, JSON.stringify(state)); }
@@ -259,14 +403,27 @@ function saveView(){
 }
 
 function seedState(){
+  // 「年初〜先月の累計額」は今日基準で作る(固定額を焼き込むと、開いた月によって不自然になるため)
+  const [sy, sm] = monthAt(0);
+  const seedUsers = JSON.parse(JSON.stringify(DEMO_DATA.users)).map(u => {
+    if(u.ytdAvgYen != null){
+      u.ytdYen = Math.round(u.ytdAvgYen * sm / 1000) * 1000;   // sm = 0-based の月 = 年初〜先月の月数
+      delete u.ytdAvgYen;
+    }
+    if(u.ytdYen == null) u.ytdYen = 0;
+    return u;
+  });
   const s = {
-    version: 1, seq: 1000,
+    version: 4, seq: 1000,
     tenant: DEMO_DATA.tenant,
     stores: JSON.parse(JSON.stringify(DEMO_DATA.stores)),
     patterns: JSON.parse(JSON.stringify(DEMO_DATA.patterns)),
-    users: JSON.parse(JSON.stringify(DEMO_DATA.users)),
+    users: seedUsers,
     conditions: JSON.parse(JSON.stringify(DEMO_DATA.conditions)),
-    shifts: [], requests: [], notifications: [], publishedMonths: {}
+    settings: JSON.parse(JSON.stringify(DEMO_DATA.settings)),
+    // createdMonths: 自動生成/公開でシフト表を「作成した」月(storeId:YYYY-MM)。
+    //  手動で1セル入れただけの月を完成扱いにしないための明示フラグ
+    shifts: [], requests: [], notifications: [], publishedMonths: {}, createdMonths: {}
   };
   const [ny, nm] = monthAt(1);
   // 来月分の希望を提出済み状態で投入
@@ -290,11 +447,13 @@ function seedState(){
 }
 
 function loadState(){
+  // 旧バージョンのデータは読まないので残さない(端末に古い構造が残り続けるのを防ぐ)
+  try{ OLD_STATE_KEYS.forEach(k => localStorage.removeItem(k)); }catch(e){}
   try{
     const raw = localStorage.getItem(STATE_KEY);
     if(raw){
       const s = JSON.parse(raw);
-      if(s && s.version === 1) return s;
+      if(s && s.version === 4) return s;
     }
   }catch(e){ console.error("state load failed, reseeding", e); }
   const s = seedState();
@@ -307,22 +466,162 @@ function loadState(){
 const storeOf = id => state.stores.find(s => s.id === id);
 const userOf  = id => state.users.find(u => u.id === id);
 const patternOf = id => state.patterns.find(p => p.id === id);
-const storePatterns = storeId => state.patterns.filter(p => p.storeId === storeId);
+// パターンは全店共通の1セット。店舗は「使うパターンのID一覧」を持つ(並び順もその一覧に従う)
+const patternsIn = (st8, storeId) => {
+  const st = st8.stores.find(s => s.id === storeId);
+  return ((st && st.patternIds) || []).map(id => st8.patterns.find(p => p.id === id)).filter(Boolean);
+};
+const storePatterns = storeId => patternsIn(state, storeId);
 const members = storeId => state.users.filter(u => u.storeId === storeId)
   .sort((a,b) => (a.role === "manager" ? -1 : 1) - (b.role === "manager" ? -1 : 1) || a.id - b.id);
 const shiftAt = (userId, ds) => state.shifts.find(s => s.userId === userId && s.date === ds);
 const reqAt   = (userId, ds) => state.requests.find(r => r.userId === userId && r.date === ds);
+// 有給はスタッフ申請・店長のセル編集のどちらから入れても requests の paid_leave として持つ
+const isLeave = r => !!r && r.type === "paid_leave";
+const dayOffCount = (userId, ym) => state.requests
+  .filter(r => r.userId === userId && r.type === "day_off" && ymOf(r.date) === ym).length;
 const isPublishedMonth = (storeId, ym) => !!state.publishedMonths[storeId + ":" + ym];
+// 「シフト表を作成した月」= 自動生成または公開を行った月。
+// 手動で数セル入れただけの月はここに入らない(＝割当のない日を公休と断定しない)
+const isMadeMonth = (storeId, ym) =>
+  !!state.createdMonths[storeId + ":" + ym] || isPublishedMonth(storeId, ym);
+
+/* ---------------- 勤務時間の既定・休憩 ----------------
+   休憩の決まり方は2層に統一している(3層にすると破綻するため増やさないこと):
+     1. パターンに休憩が設定されていれば、それを使う(手動◯分・0分も明示できる)
+     2. 設定が無ければ(自動)、段階制ルール settings.breakTiers で決まる
+   雇用形態ごとの既定が持つのは「実働時間」だけ。既定休憩は持たない
+   ------------------------------------------------------ */
+const EMP_FALLBACK = { workMin: 480 };   // 設定が壊れていても止まらないための保険
+// 労基法34条(実働6h超45分/8h超60分)を拘束時間に置き換えた初期値。値は共通設定で変更できる
+const TIERS_FALLBACK = [
+  { spanMaxMin: 360,  breakMin: 0  },
+  { spanMaxMin: 525,  breakMin: 45 },
+  { spanMaxMin: null, breakMin: 60 }
+];
+const MIN_WORK_MIN  = 240;    // 自動生成で作ってよい実働の下限(4時間)
+const MAX_WORK_MIN  = 960;    // 雇用形態の既定実働の上限(16時間)
+const MAX_BREAK_MIN = 240;    // 段階制ルールで設定してよい休憩の上限(4時間)
+
+// 雇用形態(社員/パート/学生…)ごとの既定実働時間。共通設定で編集する
+const empDefaultIn = (st8, u) => {
+  const d = (st8.settings && st8.settings.employmentDefaults) || {};
+  return (u && d[u.type]) || d["社員"] || EMP_FALLBACK;
+};
+const empDefault = u => empDefaultIn(state, u);
+const breakTiersIn = st8 => {
+  const t = st8 && st8.settings && st8.settings.breakTiers;
+  return (Array.isArray(t) && t.length) ? t : TIERS_FALLBACK;
+};
+// 段階制ルール: 拘束時間から休憩を決める(上から順に判定・最後の段は上限なし)
+function breakByTiers(tiers, spanMin){
+  const ts = (Array.isArray(tiers) && tiers.length) ? tiers : TIERS_FALLBACK;
+  for(const t of ts){ if(t.spanMaxMin == null || spanMin <= t.spanMaxMin) return t.breakMin || 0; }
+  return ts[ts.length - 1].breakMin || 0;
+}
+const breakByRuleIn = (st8, spanMin) => breakByTiers(breakTiersIn(st8), spanMin);
+const breakByRule   = spanMin => breakByRuleIn(state, spanMin);
+// 実働から拘束を逆算する(休憩は拘束の長さで決まるので、実働を満たす最小の拘束を選ぶ)
+function spanForWorkTiers(tiers, workMin){
+  const ts = (Array.isArray(tiers) && tiers.length) ? tiers : TIERS_FALLBACK;
+  for(const t of ts){
+    const span = workMin + (t.breakMin || 0);
+    if(t.spanMaxMin == null || span <= t.spanMaxMin) return span;
+  }
+  return workMin + (ts[ts.length - 1].breakMin || 0);
+}
+const spanForWorkIn = (st8, workMin) => spanForWorkTiers(breakTiersIn(st8), workMin);
+// 拘束時間(グリッドに出る幅) = 実働 + 段階制ルールの休憩
+const spanMinIn = (st8, u) => spanForWorkIn(st8, empDefaultIn(st8, u).workMin || 0);
+// 休憩(2層): パターンの設定 → 無ければ段階制ルール
+function breakMinIn(st8, sh){
+  const p = sh.patternId ? (st8.patterns || []).find(x => x.id === sh.patternId) : null;
+  if(p && p.breakMin != null) return p.breakMin;
+  return breakByRuleIn(st8, tm(sh.end) - tm(sh.start));
+}
+const breakMinOf = sh => breakMinIn(state, sh);
+const workMinOf = sh => Math.max(0, tm(sh.end) - tm(sh.start) - breakMinOf(sh));
+// パターン自身の休憩(自動なら段階制ルールで算出)。tiers を渡せば共通設定の編集中の値でも計算できる
+const patBreakMin = (p, tiers) => p.breakMin != null ? p.breakMin : breakByTiers(tiers || breakTiersIn(state), tm(p.end) - tm(p.start));
+const patBreakText = (p, tiers) => p.breakMin != null ? `休憩${p.breakMin}分` : `休憩${patBreakMin(p, tiers)}分（自動）`;
+const hLabel = min => String(Math.round(min / 6) / 10).replace(/\.0$/, "") + "h";
+// 「8時間45分」形式(共通設定など、桁を正確に見せたいところで使う)
+const hmLabel = min => `${Math.floor(min/60)}時間${min%60 ? (min%60) + "分" : ""}`;
+
+/* ---------------- 扶養範囲内の計算(仮版) ----------------
+   入力値(時給・累計額・上限額)はデモ用の仮データだが、計算は本物。
+   見込み額 = その月のシフトの「実働時間 × 時給」。だから休憩ルールが土台になる。
+   扶養外の人・時給が未設定の人は計算・警告の対象外。
+   ※意図的にスコープ外: 扶養は自動生成の制約に入れていない(表示・警告のみ)
+   ------------------------------------------------------- */
+const FUYOU_LIMIT_FALLBACK = 1230000;
+const fuyouLimit = () => {
+  const v = state.settings && state.settings.fuyou && state.settings.fuyou.limitYen;
+  return (typeof v === "number" && v > 0) ? v : FUYOU_LIMIT_FALLBACK;
+};
+// 既定: 社員・店長・オーナーは扶養外、それ以外(パート・学生)は扶養内
+const isDependent = u => u.dependent != null
+  ? !!u.dependent
+  : !(u.role === "owner" || u.type === "社員" || u.type === "店長");
+// 扶養計算の対象か(扶養内かつ時給が入っている人)
+const fuyouTarget = u => !!u && u.role !== "owner" && isDependent(u) && !!u.wage;
+const yenLabel = n => Math.round(n).toLocaleString("ja-JP") + "円";
+// その月のシフト(下書き・公開済みの両方)の実働時間 × 時給 ＋ 有給の日の賃金
+function monthEarnOf(u, y, m){
+  if(!u || !u.wage) return 0;
+  const ym = ymKey(y, m);
+  const shiftYen = state.shifts
+    .filter(s => s.userId === u.id && ymOf(s.date) === ym)
+    .reduce((a, s) => a + workMinOf(s) / 60 * u.wage, 0);
+  // 有給の日も賃金は発生する。有給は shifts でなく requests(paid_leave) に持つので別に足す。
+  // その日の時刻は決まっていないため、雇用形態の既定「実働」時間 × 時給 で見込む
+  const leaveYen = state.requests
+    .filter(r => r.userId === u.id && r.type === "paid_leave" && ymOf(r.date) === ym)
+    .reduce(a => a + (empDefault(u).workMin || 0) / 60 * u.wage, 0);
+  return shiftYen + leaveYen;
+}
+// 対象月までの累計見込み。acc = 年初〜前月(実績) + 今月〜対象月の前月(見込み)
+function fuyouOf(u, y, m){
+  const limit = fuyouLimit();
+  let acc = u.ytdYen || 0;
+  const [cy, cm] = monthAt(0);
+  const cidx = cy * 12 + cm, midx = y * 12 + m;
+  for(let i = cidx; i < midx; i++) acc += monthEarnOf(u, Math.floor(i/12), i%12);
+  const est = monthEarnOf(u, y, m);
+  const total = acc + est;
+  return { limit, acc, est, total, rest: limit - total, over: total > limit };
+}
+// 対象月に扶養超過が見込まれる店舗メンバー
+const fuyouOverMembers = (storeId, y, m) => members(storeId)
+  .filter(u => fuyouTarget(u) && fuyouOf(u, y, m).over);
 
 function notify(userId, title, body){
   state.notifications.push({ id: state.seq++, userId, title, body, read:false, createdAt: new Date().toISOString() });
 }
 
+/* ---------------- パターン割合の正規化 ----------------
+   設定値の合計が100でなくても、パターンを追加/削除しても比率として成立するように
+   「合計100%」へ正規化してから使う。割合が未設定のパターンは均等割りを仮の目標にする
+   ------------------------------------------------------ */
+function patternTargets(pats, ratio){
+  ratio = ratio || {};
+  const even = pats.length ? 100 / pats.length : 0;
+  const vals = pats.map(p => {
+    const v = ratio[p.id];
+    return (v == null || !isFinite(Number(v))) ? even : Math.max(0, Number(v));
+  });
+  const sum = vals.reduce((a,b) => a + b, 0);
+  const out = {};
+  pats.forEach((p, i) => { out[p.id] = sum > 0 ? vals[i] * 100 / sum : even; });
+  return out;
+}
+
 /* =====================================================================
    自動生成(§6 貪欲法・決定的)
    ※商談演出用の簡易版。本実装では別指示書のアルゴリズムに置き換える。
-   絶対条件: 希望休は割当てない / weeklyMaxDays・maxConsecutive・
-   出勤可能曜日を守る / 希望時間・希望パターンはその内容で割当てる
+   絶対条件: 希望休と有給は割当てない(有給は消さない・上書きしない) /
+   weeklyMaxDays・maxConsecutive・出勤可能曜日を守る /
+   希望時間・希望パターンはその内容で割当てる
    ===================================================================== */
 function generateForMonth(st8, storeId, y, m){
   const store = st8.stores.find(s => s.id === storeId);
@@ -330,7 +629,8 @@ function generateForMonth(st8, storeId, y, m){
   const ym = ymKey(y, m);
   const nDays = dim(y, m);
 
-  // 既存の対象月draftはクリアしてから生成
+  // 既存の対象月draftはクリアしてから生成(触れるのは通常シフトのみ。
+  //  有給は st8.requests 側に持つため、この処理でも以降の割当でも一切変更しない)
   st8.shifts = st8.shifts.filter(s => !(s.storeId === storeId && ymOf(s.date) === ym && s.status === "draft"));
 
   const mem = st8.users.filter(u => u.storeId === storeId);
@@ -341,7 +641,15 @@ function generateForMonth(st8, storeId, y, m){
   const reqsByDate = {};
   st8.requests.forEach(r => { if(r.storeId === storeId){ (reqsByDate[r.date] = reqsByDate[r.date] || []).push(r); } });
 
-  const maxWork = cond.monthlyDaysOff != null ? nDays - cond.monthlyDaysOff : null;
+  // 有給の日は「月の公休日数」に含めない(有給を取るほど公休が減る形にしない)。
+  // 公休をmonthlyDaysOff日そのまま確保するため、有給日数のぶん勤務可能日数を減らす
+  const leaveDays = {};
+  st8.requests.forEach(r => {
+    if(r.storeId === storeId && r.type === "paid_leave" && ymOf(r.date) === ym)
+      leaveDays[r.userId] = (leaveDays[r.userId] || 0) + 1;
+  });
+  const maxWorkFor = uid => cond.monthlyDaysOff != null
+    ? nDays - cond.monthlyDaysOff - (leaveDays[uid] || 0) : null;
 
   const monthCount = uid => { let c = 0; dates.get(uid).forEach(d => { if(ymOf(d) === ym) c++; }); return c; };
   const weekCount = (uid, ds) => {
@@ -360,16 +668,19 @@ function generateForMonth(st8, storeId, y, m){
       if(set.has(dstr(f.getFullYear(), f.getMonth(), f.getDate()))) n++; else break; }
     return n;
   };
-  const hasDayOffReq = (uid, ds) => (reqsByDate[ds] || []).some(r => r.userId === uid && r.type === "day_off");
+  // 希望休・有給はどちらも絶対条件(この日には割当てない)
+  const hasOffReq = (uid, ds) => (reqsByDate[ds] || [])
+    .some(r => r.userId === uid && (r.type === "day_off" || r.type === "paid_leave"));
   const canAssign = (u, ds, forRequest) => {
     if(dates.get(u.id).has(ds)) return false;
-    if(hasDayOffReq(u.id, ds)) return false;
+    if(hasOffReq(u.id, ds)) return false;
     // 明示的な希望提出日(時間指定・パターン希望)は本人の希望を最優先し、
     // 曜日制限・週上限・連勤・公休数のチェックを適用しない(希望が黙って落ちるのを防ぐ)
     if(forRequest) return true;
     if(u.availableDays && !u.availableDays.includes(DOWK[parseD(ds).getDay()])) return false;
     if(u.weeklyMaxDays != null && weekCount(u.id, ds) >= u.weeklyMaxDays) return false;
-    if(maxWork != null && monthCount(u.id) >= maxWork) return false;
+    const mw = maxWorkFor(u.id);
+    if(mw != null && monthCount(u.id) >= mw) return false;
     if(cond.maxConsecutive != null && runLen(u.id, ds) > cond.maxConsecutive) return false;
     return true;
   };
@@ -380,16 +691,22 @@ function generateForMonth(st8, storeId, y, m){
     st8.shifts.push(sh); dates.get(u.id).add(ds); created.push(sh);
   };
 
-  // パターン比率(早番:遅番等)の累計管理
-  const pats = st8.patterns.filter(p => p.storeId === storeId);
+  // 1コマの長さの初期値。雇用形態の既定「実働」＋段階制ルールの休憩＝拘束時間
+  const spanOf = u => spanMinIn(st8, u);
+  // 実働の下限(4時間)を拘束に換算した値。既定の実働がそれより短い人はその既定まで
+  const floorOf = u => spanForWorkIn(st8, Math.min(MIN_WORK_MIN, empDefaultIn(st8, u).workMin || 0));
+
+  // パターン比率(早番:遅番等)の累計管理。比率はパターンIDをキーに持つ
+  const pats = patternsIn(st8, storeId);
   const patCount = {}; pats.forEach(p => patCount[p.id] = 0);
   st8.shifts.forEach(s => { if(s.storeId === storeId && ymOf(s.date) === ym && s.patternId != null && patCount[s.patternId] != null) patCount[s.patternId]++; });
+  // 割合は正規化して使う(合計が100でなくても・未設定のパターンが混ざっても崩れない)
+  const targets = patternTargets(pats, cond.patternRatio);
   const pickPattern = () => {
-    const ratio = cond.patternRatio || {};
     const total = pats.reduce((a,p) => a + patCount[p.id], 0);
     let best = null, bestDef = -Infinity;
     pats.forEach(p => {
-      const target = ratio[p.name] != null ? ratio[p.name] : 100 / pats.length;
+      const target = targets[p.id];
       const cur = total ? patCount[p.id] * 100 / total : 0;
       const def = target - cur;
       if(def > bestDef + 1e-9){ bestDef = def; best = p; }
@@ -428,13 +745,10 @@ function generateForMonth(st8, storeId, y, m){
       while(assignedToday().length < need && guard++ < 50){
         const cs = candidates(); if(!cs.length) break;
         const u = cs[0];
-        if(store.mode === "pattern"){
-          const p = pickPattern();
-          if(p){ put(u, ds, p.start, p.end, p.id); patCount[p.id]++; }
-          else { put(u, ds, "10:00", "18:00", null); }
-        }else{
-          put(u, ds, "10:00", "18:00", null);
-        }
+        // パターンが無い場合は雇用形態の既定(実働+休憩)の長さで10:00から入れる(24時は超えない)
+        const p = store.mode === "pattern" ? pickPattern() : null;
+        if(p){ put(u, ds, p.start, p.end, p.id); patCount[p.id]++; }
+        else { put(u, ds, "10:00", mt(Math.min(1440, tm("10:00") + spanOf(u))), null); }
       }
     }else{
       // (3) 自由時間制: 時間帯別必要人数を30分刻みで概ね満たす(厳密最適でなくてよい)
@@ -450,18 +764,29 @@ function generateForMonth(st8, storeId, y, m){
       while(guard++ < 30){
         const unmet = slots.filter(t => covAt(t) < needAt(t));
         if(!unmet.length) break;
+        const cs = candidates(); if(!cs.length) break;
+        const u = cs[0];
+        const span = spanOf(u);                          // 割当てる人の雇用形態の既定(拘束時間)
+        const floor = Math.min(floorOf(u), span);        // 実働4時間ぶんの拘束が下限(既定がそれより短い人はその既定まで)
         const s0 = unmet[0];
         const e0 = unmet[unmet.length - 1] + 30;
         let ws, we;
-        if(e0 - s0 <= 480){ ws = s0; we = e0; }
-        else if(assignedToday().length % 2 === 0){ ws = s0; we = s0 + 480; }      // 開店側から埋める
-        else { we = e0; ws = Math.max(open, e0 - 480); }                           // 閉店側から埋める(交互)
-        if(we - ws < 240) ws = Math.max(open, we - 240); // 最短4時間(不自然な超短時間シフトを防ぐ)
-        const cs = candidates(); if(!cs.length) break;
-        put(cs[0], ds, mt(ws), mt(we), null);
+        if(e0 - s0 <= span){ ws = s0; we = e0; }
+        else if(assignedToday().length % 2 === 0){ ws = s0; we = s0 + span; }      // 開店側から埋める
+        else { we = e0; ws = Math.max(open, e0 - span); }                          // 閉店側から埋める(交互)
+        // 実働が不自然に短くならないように伸ばす(前に伸ばせなければ後ろに伸ばす)
+        if(we - ws < floor){
+          ws = Math.max(open, we - floor);
+          if(we - ws < floor) we = Math.min(close, ws + floor);
+        }
+        // 閉店まで30分未満しか残らない端数は閉店に合わせる(閉店直前だけ人が欠けるのを防ぐ)
+        if(we < close && close - we < 30) we = close;
+        put(u, ds, mt(ws), mt(we), null);
       }
     }
   }
+  // この月は「シフト表を作成した」と明示的に記録する(割当のない日=公休 と表示してよい月)
+  st8.createdMonths[storeId + ":" + ym] = true;
   return created;
 }
 
@@ -475,13 +800,72 @@ function isShortDay(storeId, ds){
     const need = isWeekend(ds) ? (cond.weekendHeadcount ?? 0) : (cond.weekdayHeadcount ?? 0);
     return shs.length < need;
   }
+  const covAt = t => shs.filter(s => tm(s.start) <= t && t < tm(s.end)).length;
   for(const b of bands){
-    for(let t = tm(b.from); t < tm(b.to); t += 30){
-      const cov = shs.filter(s => tm(s.start) <= t && t < tm(s.end)).length;
-      if(cov < b.count) return true;
+    const from = tm(b.from), to = tm(b.to);
+    for(let t = from; t < to; t += 30){
+      if(covAt(t) < b.count) return true;
     }
+    // 30分刻みだと帯の末尾(閉店15分前など)を取りこぼすので、末尾の直前も必ず見る
+    if(to - 1 >= from && covAt(to - 1) < b.count) return true;
   }
   return false;
+}
+
+/* =====================================================================
+   印刷 / CSV書き出し
+   ※サーバー・外部ライブラリなし。CSVはBlobでクライアント側完結
+   ===================================================================== */
+// 用紙向き("landscape"=月間シフト表 / "portrait"=個人分)
+function setPageSize(orientation){
+  const el = document.getElementById("page-style");
+  const css = `@page{ size:A4 ${orientation}; margin:10mm; }`;
+  if(el.textContent !== css) el.textContent = css;
+}
+// 印刷直前に「出力日時」を現在時刻へ更新する
+function stampNow(){
+  const el = document.getElementById("print-stamp");
+  if(el) el.textContent = stampStr();
+}
+
+// 既存の列順は変えず、末尾に「休憩」「実働時間」を追加する(Excel側でも同じ計算ができるように)
+const CSV_HEAD = ["店舗名","日付","スタッフ名","開始時刻","終了時刻","パターン名","休憩(分)","実働時間(h)"];
+
+// CSVインジェクション対策(= + - @ 始まりはシングルクォートを前置)と
+// カンマ・ダブルクォート・改行のエスケープ
+function csvCell(v){
+  let s = v == null ? "" : String(v);
+  if(/^[=+\-@]/.test(s)) s = "'" + s;
+  if(/[",\r\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+// Excelでの文字化けを防ぐためUTF-8 BOM付き・改行はCRLF
+function buildCsv(rows){
+  return "\uFEFF" + rows.map(r => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+// 1行=1シフト。パターン名は自由時間制の店舗では空欄
+function shiftCsvRows(storeId, y, m){
+  const st = storeOf(storeId);
+  const ym = ymKey(y, m);
+  const rows = [CSV_HEAD.slice()];
+  state.shifts.filter(s => s.storeId === storeId && ymOf(s.date) === ym)
+    .sort((a,b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || (tm(a.start) - tm(b.start)) || (a.userId - b.userId))
+    .forEach(s => {
+      const u = userOf(s.userId);
+      const p = s.patternId ? patternOf(s.patternId) : null;
+      rows.push([st.name, s.date, u ? u.name : "", s.start, s.end, p ? p.name : "",
+        breakMinOf(s), (workMinOf(s) / 60).toFixed(2)]);
+    });
+  return rows;
+}
+const fileSafe = s => String(s).replace(/[\\\/:*?"<>|]/g, "_").trim();
+// Blob + createObjectURL でローカル完結(外部通信なし・file://でも動く)
+function saveTextFile(filename, text, mime){
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /* =====================================================================
@@ -495,9 +879,15 @@ function render(){
   else if(view.role === "staff"){ html = hdrHtml() + staffHtml(); }
   else if(view.role === "manager"){ html = hdrHtml() + `<div class="wrap no-tab">${managerHtml(view.storeId)}</div>`; }
   else if(view.role === "owner"){
-    html = hdrHtml() + `<div class="wrap no-tab">${ui.ownerStore ? managerHtml(ui.ownerStore, true) : ownerHtml()}</div>`;
+    const body = ui.ownerStore ? managerHtml(ui.ownerStore, true)
+      : ui.ownerScreen === "settings" ? commonSettingsHtml()
+      : ui.ownerScreen === "staff" ? staffSettingsHtml()
+      : ownerHtml();
+    html = hdrHtml() + `<div class="wrap no-tab">${body}</div>`;
   }
   app.innerHTML = html;
+  // 個人分はA4縦、月間シフト表はA4横（画面からCtrl+Pされた場合にも合わせる）
+  setPageSize(view && view.role === "staff" ? "portrait" : "landscape");
 }
 
 function vpLabel(){
@@ -581,22 +971,34 @@ function calHtml(y, m, cellFn, onclickName){
 function staffShiftTab(me){
   const [y, m] = monthAt(ui.staffCalOffset);
   const st = storeOf(me.storeId);
+  // 公開済みの月は「割当のない日=公休」。未公開の月は空欄のまま(まだ休みが確定していない)
+  const pubMonth = isPublishedMonth(me.storeId, ymKey(y, m));
   const cell = ds => {
+    const leaveChip = isLeave(reqAt(me.id, ds)) ? `<span class="chip leave">有給</span>` : "";
     const sh = shiftAt(me.id, ds);
-    if(!sh || sh.status !== "published") return "";
+    // 有給の日にシフトが入っていることもある(店長が後から入れた等)。
+    // 本人が気づけないと困るのでシフトを優先して出し、有給は併記する
+    if(!sh || sh.status !== "published")
+      return leaveChip || (pubMonth ? `<span class="chip ghost">公休</span>` : "");
     const p = sh.patternId ? patternOf(sh.patternId) : null;
     if(p && p.start === sh.start && p.end === sh.end)
-      return `<span class="chip" style="background:${p.color}">${esc(p.name)}</span>`;
-    return `<span class="chip" style="background:${st.color}">${sh.start}-${sh.end}</span>`;
+      // pr-time: 印刷時のみ表示。白黒でもパターンを判別できるよう時刻を必ず併記する
+      return `<span class="chip" style="background:${p.color}; --c:${p.color}">${esc(p.name)}<small class="pr-time">${sh.start}-${sh.end}</small></span>${leaveChip}`;
+    return `<span class="chip" style="background:${st.color}; --c:${st.color}">${sh.start}-${sh.end}</span>${leaveChip}`;
   };
   return `<div class="card">
+    <div class="print-head">
+      <div class="ph-ttl">${esc(me.name)}さんのシフト　${y}年${m+1}月</div>
+      <div class="ph-meta">${esc(st.name)}　／　出力日時: <span id="print-stamp">${stampStr()}</span>　／　公開済みのシフトのみ記載</div>
+    </div>
     <div class="cal-head">
       <button class="btn btn-sm" onclick="A.staffCal(-1)">‹ 前月</button>
       <span class="ttl">${y}年${m+1}月のシフト</span>
       <button class="btn btn-sm" onclick="A.staffCal(1)">翌月 ›</button>
     </div>
     ${calHtml(y, m, cell, "A.staffDay")}
-    <p class="small muted" style="margin:8px 0 0;">公開済みのシフトのみ表示されます。日付をタップするとその日の店舗全体の体制が見られます。</p>
+    <p class="small muted no-print" style="margin:8px 0 0;">公開済みのシフトのみ表示されます。日付をタップするとその日の店舗全体の体制が見られます。</p>
+    <div class="pr-bar"><button class="btn btn-sm" onclick="A.printSheet()">🖨 このシフトを印刷</button></div>
   </div>`;
 }
 
@@ -606,12 +1008,14 @@ function staffReqTab(me){
     const r = reqAt(me.id, ds);
     if(!r) return "";
     if(r.type === "day_off") return `<span class="chip ghost">希望休</span>`;
+    if(r.type === "paid_leave") return `<span class="chip leave">有給</span>`;
     if(r.type === "time") return `<span class="chip ghost">${r.start}-${r.end}</span>`;
     if(r.type === "pattern"){ const p = patternOf(r.patternId); return `<span class="chip ghost">${esc(p?p.name:"?")}希望</span>`; }
     return `<span class="chip ghost">${anyLabel(r.storeId)}</span>`;
   };
   const myReqs = state.requests.filter(r => r.userId === me.id && ymOf(r.date) === ymKey(y,m))
     .sort((a,b) => a.date < b.date ? -1 : 1);
+  const offN = dayOffCount(me.id, ymKey(y, m));
   const list = myReqs.length ? myReqs.map(r => `<div class="req-item">
       <b>${jdate(r.date)}</b><span>${reqLabel(r)}</span>
       <span style="flex:1"></span><span class="muted small">提出済み</span>
@@ -619,13 +1023,16 @@ function staffReqTab(me){
   return `<div class="card">
     <div class="cal-head"><span class="ttl">${y}年${m+1}月の希望提出</span></div>
     ${calHtml(y, m, cell, "A.openReq")}
-    <p class="small muted" style="margin:8px 0 0;">日付をタップして希望休・希望時間を提出できます（提出済みの日は修正・取り下げ可）。</p>
+    <p class="small muted" style="margin:8px 0 0;">日付をタップして希望休・有給・希望時間を提出できます（提出済みの日は修正・取り下げ可）。</p>
   </div>
-  <div class="card"><h2 class="sec">提出済みの希望</h2><div class="req-list">${list}</div></div>`;
+  <div class="card"><h2 class="sec">提出済みの希望</h2>
+    <p class="small ${offN >= MAX_DAY_OFF ? "" : "muted"}">希望休 ${offN} / ${MAX_DAY_OFF}日（有給は上限に含みません）</p>
+    <div class="req-list">${list}</div></div>`;
 }
 
 function reqLabel(r){
   if(r.type === "day_off") return "希望休";
+  if(r.type === "paid_leave") return "有給";
   if(r.type === "time") return `時間指定 ${r.start}〜${r.end}`;
   if(r.type === "pattern"){ const p = patternOf(r.patternId); return `${p ? esc(p.name) : "?"}を希望`; }
   return anyLabel(r.storeId);
@@ -659,15 +1066,22 @@ function managerHtml(storeId, fromOwner){
   const stChip = hasPub && !hasDraft ? `<span class="st-chip st-pub">公開済み</span>`
     : hasDraft ? `<span class="st-chip st-draft">下書きあり</span>`
     : `<span class="st-chip st-none">未作成</span>`;
+  // 印刷時の状態表記。下書きは確定版との取り違えを防ぐため紙面に必ず明示する
+  const prState = hasDraft ? "下書き" : hasPub ? "公開済み" : "未作成";
+  // シフト作成済み(自動生成/公開を行った)の月だけ「割当なし=公休」と表示する。
+  // シフト件数では判定しない(手動で1セル入れただけの月が完成シフト表に見えてしまうため)
+  const made = isMadeMonth(storeId, ym);
 
-  let head = `<th class="name-col">スタッフ</th>`;
+  let head = `<th class="name-col" data-pstate="${prState}">スタッフ</th>`;
   for(let d=1; d<=nDays; d++){
     const ds = dstr(y, m, d); const g = parseD(ds).getDay();
     head += `<th class="${ds===tds?'today':''}">${d}<span class="dw ${g===0?'sun':g===6?'sat':''}">${DOWJ[g]}</span></th>`;
   }
 
   const rows = mem.map(u => {
-    let tds2 = `<td class="name-col"><b>${esc(u.name)}</b><small>${esc(u.type)}${u.weeklyMaxDays?`・週${u.weeklyMaxDays}日まで`:""}</small></td>`;
+    // 扶養内のスタッフは、この月の見込みで上限を超えそうなら名前の下に警告を出す(表示のみ・自動生成の制約には入れていない)
+    const fw = fuyouTarget(u) && fuyouOf(u, y, m).over ? `<small class="fw">⚠扶養超過見込み</small>` : "";
+    let tds2 = `<td class="name-col clk" onclick="A.openUser(${u.id})"><b>${esc(u.name)}</b><small>${esc(u.type)}${u.weeklyMaxDays?`・週${u.weeklyMaxDays}日まで`:""}</small>${fw}<small class="gear">⚙ 個人設定</small></td>`;
     for(let d=1; d<=nDays; d++){
       const ds = dstr(y, m, d);
       const sh = shiftAt(u.id, ds);
@@ -677,14 +1091,27 @@ function managerHtml(storeId, fromOwner){
         const p = sh.patternId ? patternOf(sh.patternId) : null;
         const draftCls = sh.status === "draft" ? " draft" : "";
         if(p){
-          const custom = (p.start !== sh.start || p.end !== sh.end) ? `<small>${sh.start}-${sh.end}</small>` : "";
-          inner = `<span class="sh-chip${draftCls}" style="background:${p.color}">${esc(p.name)}${custom}</span>`;
+          const custom = (p.start !== sh.start || p.end !== sh.end) ? `<small class="sc-adj">${sh.start}-${sh.end}</small>` : "";
+          // pr-time: 印刷時のみ表示。白黒でもパターンを判別できるよう時刻を必ず併記する
+          inner = `<span class="sh-chip${draftCls}" style="background:${p.color}; --c:${p.color}">${esc(p.name)}${custom}<small class="pr-time">${sh.start}<br>${sh.end}</small></span>`;
         }else{
-          inner = `<span class="sh-chip free-sh${draftCls}">${sh.start}<small>${sh.end}</small></span>`;
+          inner = `<span class="sh-chip free-sh${draftCls}" style="--c:${st.color}">${sh.start}<small>${sh.end}</small></span>`;
         }
-        if(rq && rq.type === "day_off") conflict = " conflict";
+        if(rq && (rq.type === "day_off" || rq.type === "paid_leave")) conflict = " conflict";
+      }else if(rq && rq.type === "paid_leave"){
+        inner = `<span class="off-chip leave">有給</span>`;
+      }else if(made){
+        // 作成済みの月で割当がない日は、希望の有無にかかわらず「公休」。
+        // 希望の文字(希望休/10:00-15:00 等)を残すと紙面で勤務日と誤読されるため必ず公休にする。
+        // 由来が分かる補助表示は画面のみ(印刷では .oc-sub を非表示)
+        let sub = "";
+        if(rq) sub = rq.type === "day_off"
+          ? `<small class="oc-sub">希望</small>`      // 希望休が通った日
+          : `<small class="oc-sub">希望未反映</small>`; // 勤務希望を出したが割当がなかった日
+        inner = `<span class="off-chip">公休${sub}</span>`;
       }else if(rq){
-        if(rq.type === "day_off") inner = `<span class="rq off">希望休</span>`;
+        // 未作成の月は「まだ休みが確定していない」ので、提出された希望だけを見せる
+        if(rq.type === "day_off") inner = `<span class="off-chip">希望休</span>`;
         else if(rq.type === "time") inner = `<span class="rq">希望<br>${rq.start}<br>${rq.end}</span>`;
         else if(rq.type === "pattern"){ const p = patternOf(rq.patternId); inner = `<span class="rq">${esc(p?p.name:"?")}<br>希望</span>`; }
         else inner = `<span class="rq">${anyLabel(storeId)}</span>`;
@@ -704,6 +1131,7 @@ function managerHtml(storeId, fromOwner){
     foot += `</tr></tfoot>`;
   }
 
+  const overN = fuyouOverMembers(storeId, y, m).length;
   const backBtn = fromOwner ? `<button class="btn btn-sm" onclick="A.ownerBack()">‹ ダッシュボード</button>` : "";
   const nextBtns = ui.mgrMonthOffset === 1
     ? `<button class="btn" onclick="A.generate(${storeId})">✨ 自動生成</button>
@@ -711,11 +1139,18 @@ function managerHtml(storeId, fromOwner){
     : "";
   const reqCount = state.requests.filter(r => r.storeId === storeId && ymOf(r.date) === ym).length;
 
+  const printHead = `<div class="print-head">
+    <div class="ph-ttl">${prState === "下書き" ? `<span class="ph-draft">下書き（未公開）</span>` : ""}${esc(st.name)}　${y}年${m+1}月 シフト表</div>
+    <div class="ph-meta">${esc(state.tenant.name)}　／　状態: ${prState === "下書き" ? "下書き（未公開・確定版ではありません）" : prState}　／　出力日時: <span id="print-stamp">${stampStr()}</span></div>
+  </div>`;
+
   return `
+  ${printHead}
   <div class="mgr-toolbar">
     ${backBtn}
     <span style="font-weight:700; font-size:15px;"><span class="store-dot" style="display:inline-block;background:${st.color}"></span> ${esc(st.name)}</span>
     <span class="st-chip ${st.mode==='pattern'?'st-none':'st-none'}">${st.mode === "pattern" ? "パターン制" : "自由時間制"}</span>
+    ${overN ? `<span class="fw-chip">⚠ 扶養超過見込み ${overN}名</span>` : ""}
     <span style="flex:1"></span>
     <button class="btn btn-sm" onclick="A.mgrConditions(${storeId})">⚙ 条件設定</button>
   </div>
@@ -728,13 +1163,17 @@ function managerHtml(storeId, fromOwner){
     ${stChip}
     <span class="small muted">希望 ${reqCount}件</span>
     <span style="flex:1"></span>
+    <button class="btn btn-sm" onclick="A.printSheet()">🖨 印刷</button>
+    <button class="btn btn-sm" onclick="A.exportCsv(${storeId})">⬇ CSVダウンロード</button>
     ${nextBtns}
   </div>
   <div class="grid-wrap">
     <table class="grid"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody>${foot}</table>
   </div>
-  <p class="small muted" style="margin-top:8px;">
-    セルをタップして手動入力・編集できます。グレーはスタッフから提出された希望（自動反映）、点線チップは下書き（未公開）です。
+  <p class="small muted no-print" style="margin-top:8px;">
+    セルをタップして手動入力・編集できます（スタッフ名をタップすると<b>個人設定</b>）。点線の枠は下書き（未公開）です。
+    シフト表を作成すると、割当のない日は「公休」（希望休が通った日は「公休/希望」）、有給の日は「有給」と表示されます
+    （有給は自動生成の対象外・公休日数にも含みません）。未作成の月は、スタッフから提出された希望だけがグレーで表示されます。
   </p>`;
 }
 
@@ -748,9 +1187,17 @@ function condHtml(storeId, fromOwner){
   let modeArea = "";
   if(st.mode === "pattern"){
     const pats = storePatterns(storeId);
-    modeArea = `<h2 class="sec">パターン割合（%）</h2>` + pats.map(p =>
+    // 割合はパターンIDをキーに持つ(共通設定で名前を変えても崩れない)。
+    // 合計が100でなくても・未設定のパターンが混ざっても成立するよう、正規化した「実効」値を併記する
+    const tg = patternTargets(pats, c.patternRatio);
+    const sum = pats.reduce((a,p) => a + (((c.patternRatio||{})[p.id] != null) ? Number((c.patternRatio||{})[p.id]) || 0 : 0), 0);
+    modeArea = `<h2 class="sec">パターン割合（%）</h2>` + (pats.length ? pats.map(p =>
       `<div class="frow"><label>${esc(p.name)}（${p.start}〜${p.end}）</label>
-       <input type="number" min="0" max="100" value="${(c.patternRatio||{})[p.name] ?? ""}" onchange="A.condRatio('${esc(p.name)}', this.value)"> %</div>`).join("");
+       <input type="number" min="0" max="100" value="${(c.patternRatio||{})[p.id] ?? ""}" onchange="A.condRatio(${p.id}, this.value)"> %
+       <span class="small muted">実効 ${tg[p.id].toFixed(1)}%</span></div>`).join("")
+      + `<p class="small muted" style="margin:2px 0 0;">入力の合計は ${sum}%（未設定のパターンは均等割り）。
+         合計が100%でなくても<b>比率として正規化</b>して使うので、パターンを追加・削除しても崩れません。実際に使われるのは右の「実効」値です。</p>`
+      : `<p class="small muted">この店舗で使うパターンが未選択です（オーナーの「共通設定」で選びます）。</p>`);
   }else{
     const rows = (c.hourlyHeadcount || []).map((b, i) =>
       `<div class="band-row">
@@ -796,18 +1243,158 @@ function ownerHtml(){
       : hasDraft ? `<span class="st-chip st-draft">下書き</span>` : `<span class="st-chip st-none">未作成</span>`;
     const reqN = state.requests.filter(r => r.storeId === st.id && ymOf(r.date) === nYm).length;
     const mg = members(st.id).find(u => u.role === "manager");
+    const over = fuyouOverMembers(st.id, ny, nm);
     return `<div class="card own-card" onclick="A.ownerOpen(${st.id})">
       <span class="bar" style="background:${st.color}"></span>
       <div class="info">
         <div class="nm">${esc(st.name)}</div>
         <div class="meta">店長: ${esc(mg?mg.name:"-")}｜${st.mode==="pattern"?"パターン制":"自由時間制"}</div>
         <div class="meta">来月シフト: ${status}　希望提出: ${reqN}件</div>
+        <div class="meta">${over.length
+          ? `<span class="fw-chip">⚠ 扶養超過見込み ${over.length}名</span> <span class="small">${esc(over.map(u=>u.name).join("・"))}</span>`
+          : `扶養: 超過見込みなし`}</div>
       </div>
       <span class="arrow">›</span>
     </div>`;
   }).join("");
-  return `<h2 class="sec" style="font-size:17px;">全店舗ダッシュボード（${ny}年${nm+1}月）</h2>${cards}
-  <p class="small muted">店舗カードをタップすると、その店舗のシフト表（店長画面と同等）を開きます。</p>`;
+  return `<div class="mgr-toolbar">
+    <h2 class="sec" style="font-size:17px; margin:0;">全店舗ダッシュボード（${ny}年${nm+1}月）</h2>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" onclick="A.openStaffSettings()">👤 個人設定</button>
+    <button class="btn btn-sm" onclick="A.openCommonSettings()">⚙ 共通設定</button>
+  </div>${cards}
+  <p class="small muted">店舗カードをタップすると、その店舗のシフト表（店長画面と同等）を開きます。</p>
+  <p class="small muted">「共通設定」では雇用形態ごとの既定実働時間・休憩の自動ルール・全店共通のシフトパターン・扶養の上限額を設定できます。「個人設定」ではスタッフごとの時給・扶養区分などを設定できます。</p>`;
+}
+
+/* ---------------- 個人設定(スタッフ一覧) ---------------- */
+function staffSettingsHtml(){
+  const [y, m] = monthAt(ui.mgrMonthOffset);
+  const cards = state.stores.map(st => {
+    const rows = members(st.id).map(u => {
+      const f = fuyouTarget(u) ? fuyouOf(u, y, m) : null;
+      const sub = fuyouTarget(u)
+        ? `時給${u.wage.toLocaleString("ja-JP")}円・扶養内　累計＋見込み ${yenLabel(f.total)} / 上限 ${yenLabel(f.limit)}`
+        : `${isDependent(u) ? "扶養内（時給未設定のため計算対象外）" : "扶養外（計算対象外）"}`;
+      return `<div class="us-row" onclick="A.openUser(${u.id})">
+        <span class="store-dot" style="background:${st.color}"></span>
+        <div class="ui2"><b>${esc(u.name)}</b><small>${esc(u.type)}${u.weeklyMaxDays?`・週${u.weeklyMaxDays}日まで`:""}</small>
+          <small>${sub}</small></div>
+        ${f && f.over ? `<span class="fw-chip">⚠ 超過見込み</span>` : ""}
+        <span class="arrow">›</span>
+      </div>`;
+    }).join("");
+    return `<div class="card"><h2 class="sec"><span class="store-dot" style="display:inline-block;background:${st.color}"></span> ${esc(st.name)}</h2>${rows}</div>`;
+  }).join("");
+  return `<div class="mgr-toolbar">
+    <button class="btn btn-sm" onclick="A.ownerBack()">‹ ダッシュボード</button>
+    <span style="font-weight:700;">個人設定（スタッフごと）</span>
+    <span style="flex:1"></span>
+    <span class="small muted">${y}年${m+1}月で計算</span>
+  </div>
+  <p class="small muted">スタッフをタップすると、雇用形態・週の最大勤務日数・出勤可能曜日・時給・年初〜先月の累計額・扶養区分を編集できます。</p>
+  ${cards}`;
+}
+
+/* ---------------- 共通設定(オーナーのみ・全店舗に効く) ---------------- */
+function commonSettingsHtml(){
+  const d = ui.setDraft;
+
+  // (1) 雇用形態ごとの既定「実働」時間。自動生成の初期値になる(店長はセルで個別に変更可)
+  //     休憩は持たせない(2層のルール: パターンの設定 → 無ければ段階制ルール)
+  const empKeys = Object.keys(d.employmentDefaults);
+  const empRows = empKeys.map((t, i) => {
+    const e = d.employmentDefaults[t];
+    const span = spanForWorkTiers(d.breakTiers, e.workMin);
+    return `<div class="frow emp-row">
+      <label>${esc(t)}</label>
+      <span class="unit">実働 <input type="number" min="0.5" max="${MAX_WORK_MIN/60}" step="0.5" value="${e.workMin/60}" onchange="A.empField(${i},'work',this.value)"> 時間</span>
+      <span class="small muted">＋ 休憩${breakByTiers(d.breakTiers, span)}分（自動）＝ 拘束 ${hmLabel(span)}</span>
+    </div>`;
+  }).join("");
+
+  // (2) 休憩の段階制ルール(拘束時間 → 休憩)。法令の数字はハードコードせずここで変更できる
+  const tierRows = d.breakTiers.map((t, i) => {
+    const isLast = t.spanMaxMin == null;
+    const cond = isLast
+      ? `<span class="unit">それを超える</span>`
+      : `<span class="unit">拘束 <input type="number" min="0" max="24" step="1" value="${Math.floor(t.spanMaxMin/60)}"
+            onchange="A.tierField(${i},'h',this.value)"> 時間
+          <input type="number" min="0" max="59" step="5" value="${t.spanMaxMin%60}"
+            onchange="A.tierField(${i},'m',this.value)"> 分 以下</span>`;
+    return `<div class="frow emp-row">${cond}
+      <span class="unit">→ 休憩 <input type="number" min="0" max="240" step="5" value="${t.breakMin}"
+        onchange="A.tierField(${i},'break',this.value)"> 分</span>
+    </div>`;
+  }).join("");
+
+  // (3) シフトパターン(全店共通の1セット)
+  const patRows = d.patterns.length ? d.patterns.map(p => {
+    const span = tm(p.end) - tm(p.start);
+    const br = patBreakMin(p, d.breakTiers);
+    const used = d.stores.filter(s => (s.patternIds||[]).includes(p.id)).map(s => s.name);
+    return `<div class="pat-row">
+      <span class="pc" style="background:${p.color}"></span>
+      <div class="pi">
+        <b>${esc(p.name)}</b>
+        <small>${p.start}〜${p.end}（${p.breakMin != null ? `休憩${br}分・手動` : `休憩${br}分・自動`}・実働${hmLabel(span - br)}）</small>
+        <small>使用店舗: ${used.length ? esc(used.join("・")) : "なし"}</small>
+      </div>
+      <button class="btn btn-sm" onclick="A.editPattern(${p.id})">編集</button>
+      <button class="btn btn-sm btn-danger" onclick="A.askDelPattern(${p.id})">✕</button>
+    </div>`;
+  }).join("") : `<p class="small muted">パターンがありません。「＋ パターンを追加」で登録してください。</p>`;
+
+  // (4) 店舗ごとに使うパターンを選ぶ(パターン制はもちろん自由時間制の店舗でも使える)
+  const storeRows = d.stores.map(st => {
+    const chks = d.patterns.map(p => `<label class="chk">
+      <input type="checkbox" ${(st.patternIds||[]).includes(p.id) ? "checked" : ""}
+        onchange="A.storePat(${st.id},${p.id},this.checked)">
+      <span class="store-dot" style="background:${p.color}"></span>${esc(p.name)} ${p.start}〜${p.end}</label>`).join("");
+    return `<div class="set-store">
+      <div class="sn"><span class="store-dot" style="display:inline-block;background:${st.color}"></span> ${esc(st.name)}
+        <span class="small muted">${st.mode === "pattern" ? "パターン制" : "自由時間制（手動あてはめ用）"}</span></div>
+      <div class="chk-grid">${chks || `<span class="small muted">選べるパターンがありません</span>`}</div>
+    </div>`;
+  }).join("");
+
+  return `<div class="mgr-toolbar">
+    <button class="btn btn-sm" onclick="A.ownerBack()">‹ ダッシュボード</button>
+    <span style="font-weight:700;">共通設定（全店舗）</span>
+  </div>
+  <div class="card">
+    <h2 class="sec">雇用形態ごとの既定実働時間</h2>
+    <p class="small muted" style="margin:0 0 8px;">自動生成のときの1コマの長さに使います（自由時間制の店舗の自動生成に使います。パターン制の店舗はパターンの時刻が優先されます）。休憩は下の「休憩の自動ルール」で決まるので、ここでは実働だけを設定します。店長は各セルを開いて個別の時刻に変更できます。<br>下の「拘束」はこの設定どおりの目安です。<b>実際の時刻は店舗の営業時間に合わせて調整されることがあります</b>（例: 閉店まで30分未満しか残らないときは閉店に合わせます）。</p>
+    ${empRows}
+  </div>
+  <div class="card">
+    <h2 class="sec">休憩の自動ルール（段階制）</h2>
+    <p class="small muted" style="margin:0 0 8px;">休憩は<b>2段階</b>で決まります。①パターンに休憩が設定されていればそれを使う　②設定が無ければ下のルールで自動的に決まる。<br>
+      初期値は労働基準法（実働6時間超で45分・8時間超で60分）を拘束時間に置き換えたものです。<b>法改正に合わせてここで変更できます。</b></p>
+    ${tierRows}
+  </div>
+  <div class="card">
+    <h2 class="sec">シフトパターン（全店共通）</h2>
+    <p class="small muted" style="margin:0 0 4px;">ここで1セット登録し、下の「店舗ごとの使用パターン」で店舗ごとに選びます。休憩は「自動（ルールで決める）」と「手動◯分」を選べます。</p>
+    ${patRows}
+    <div style="margin-top:10px;"><button class="btn btn-sm" onclick="A.editPattern(null)">＋ パターンを追加</button></div>
+  </div>
+  <div class="card">
+    <h2 class="sec">店舗ごとの使用パターン</h2>
+    <p class="small muted" style="margin:0 0 8px;"><b>自由時間制の店舗では手動あてはめ用</b>です（自動生成には使われず、店長がセルにあてはめて微調整するときと、スタッフのパターン希望で使えます）。</p>
+    ${storeRows}
+  </div>
+  <div class="card">
+    <h2 class="sec">扶養の上限額（年間）</h2>
+    <p class="small muted" style="margin:0 0 8px;">扶養内のスタッフの「累計＋今月の見込み」がこの金額を超えると警告が出ます。<b>基準額は改正が続いているため、固定値ではなく設定値にしています。</b></p>
+    <div class="frow"><label>年間の上限額</label>
+      <input type="number" min="0" max="99999999" step="10000" style="width:130px;"
+        value="${d.fuyouLimit}" onchange="A.fuyouLimitField(this.value)"> 円</div>
+  </div>
+  <div style="display:flex; gap:8px; margin-bottom:20px;">
+    <button class="btn btn-primary" onclick="A.saveCommonSettings()">保存する</button>
+    <button class="btn" onclick="A.ownerBack()">キャンセル</button>
+  </div>`;
 }
 
 /* =====================================================================
@@ -845,6 +1432,7 @@ const A = {
     else view = { role:"staff", userId:id };
     ui.staffTab = "shift"; ui.staffCalOffset = 0;
     ui.mgrMonthOffset = 1; ui.mgrScreen = "grid"; ui.ownerStore = null;
+    ui.ownerScreen = "dash"; ui.setDraft = null; ui.condDraft = null;
     saveView(); render();
   },
   gotoSelect(){ view = null; saveView(); render(); },
@@ -879,10 +1467,15 @@ const A = {
     const curArea = cur ? `<p class="small" style="background:var(--accent-soft); border-radius:8px; padding:8px 10px;">
         提出済み: <b>${reqLabel(cur)}</b>
         <button class="btn btn-sm btn-danger" onclick="A.dropReq('${ds}')">取り下げる</button></p>` : "";
-    let opts = `<button class="btn btn-lg" onclick="A.submitReq('${ds}','day_off')">😴 希望休</button>`;
+    const offN = dayOffCount(me.id, ymOf(ds));
+    const guide = `<p class="small muted" style="margin:0 0 6px;">
+      希望休 ${offN} / ${MAX_DAY_OFF}日（有給は上限に含みません）</p>`;
+    let opts = `<button class="btn btn-lg" onclick="A.submitReq('${ds}','day_off')">😴 希望休</button>
+      <button class="btn btn-lg" onclick="A.submitReq('${ds}','paid_leave')">🏖 有給申請</button>`;
+    // 店舗にパターンがあれば、自由時間制の店舗でもパターンで希望を出せる
+    opts += storePatterns(st.id).map(p =>
+      `<button class="btn btn-lg" onclick="A.submitReq('${ds}','pattern',${p.id})">${esc(p.name)}を希望（${p.start}〜${p.end}）</button>`).join("");
     if(st.mode === "pattern"){
-      opts += storePatterns(st.id).map(p =>
-        `<button class="btn btn-lg" onclick="A.submitReq('${ds}','pattern',${p.id})">${esc(p.name)}を希望（${p.start}〜${p.end}）</button>`).join("");
       opts += `<button class="btn btn-lg" onclick="A.submitReq('${ds}','any')">どちらでも</button>`;
     }else{
       opts += `<button class="btn btn-lg" onclick="A.submitReq('${ds}','any')">終日可</button>
@@ -891,7 +1484,7 @@ const A = {
       </div>
       <button class="btn btn-lg btn-primary" onclick="A.submitReqTime('${ds}')">この時間で提出</button>`;
     }
-    openModal(`${mdlHead(jdate(ds) + " の希望")}${curArea}<div class="opt-grid">${opts}</div>`);
+    openModal(`${mdlHead(jdate(ds) + " の希望")}${curArea}${guide}<div class="opt-grid">${opts}</div>`);
   },
   submitReq(ds, type, patternId){
     this._putReq(ds, { type, patternId: patternId || null, start:null, end:null });
@@ -904,6 +1497,16 @@ const A = {
   },
   _putReq(ds, data){
     const me = userOf(view.userId);
+    // 希望休は月MAX_DAY_OFF日まで(有給は別枠でカウントしない)。
+    // 同じ日の出し直しは差し替えなので、その日ぶんは残数から除いて数える
+    if(data.type === "day_off"){
+      const used = state.requests.filter(r =>
+        r.userId === me.id && r.type === "day_off" && ymOf(r.date) === ymOf(ds) && r.date !== ds).length;
+      if(used >= MAX_DAY_OFF){
+        toast(`希望休は月${MAX_DAY_OFF}日までです（すでに${used}日提出済み・有給は別枠）`);
+        return;
+      }
+    }
     state.requests = state.requests.filter(r => !(r.userId === me.id && r.date === ds));
     state.requests.push({
       id: state.seq++, storeId: me.storeId, userId: me.id, date: ds,
@@ -911,7 +1514,7 @@ const A = {
       status: "submitted", createdAt: new Date().toISOString()
     });
     saveState(); closeModal(); render();
-    toast("店長に送信されました");
+    toast(data.type === "paid_leave" ? "有給を申請しました（店長に送信）" : "店長に送信されました");
   },
   dropReq(ds){
     const me = userOf(view.userId);
@@ -929,9 +1532,10 @@ const A = {
     render();
   },
   condField(key, val){ ui.condDraft[key] = val === "" ? null : Number(val); },
-  condRatio(name, val){
+  condRatio(patternId, val){
     ui.condDraft.patternRatio = ui.condDraft.patternRatio || {};
-    ui.condDraft.patternRatio[name] = val === "" ? 0 : Number(val);
+    ui.condDraft.patternRatio[patternId] = val === "" ? 0 : Number(val);
+    render();   // 「実効◯%」を入力に追従させる
   },
   bandField(i, key, val){
     const b = ui.condDraft.hourlyHeadcount[i];
@@ -959,26 +1563,46 @@ const A = {
     const u = userOf(userId);
     const sh = shiftAt(userId, ds);
     const rq = reqAt(userId, ds);
+    const pats = storePatterns(storeId);
+    const emp = empDefault(u);
     const info = [];
     if(sh){
       const p = sh.patternId ? patternOf(sh.patternId) : null;
       info.push(`現在: <b>${p ? esc(p.name) + "　" : ""}${sh.start}〜${sh.end}</b>${sh.status==="draft"?"（下書き）":"（公開済み）"}`);
+      // 休憩は2層: パターンの設定 → 無ければ段階制ルール。どちらが効いたかが分かるように出す
+      info.push(`休憩 ${breakMinOf(sh)}分（${p && p.breakMin != null ? "パターンの設定" : "休憩の自動ルール"}）・実働 ${hLabel(workMinOf(sh))}`);
+    }else{
+      const span = spanMinIn(state, u);
+      info.push(`${esc(u.type)}の既定: 実働 ${hLabel(emp.workMin)}＋休憩 ${breakByRule(span)}分（自動）＝ 拘束 ${hmLabel(span)}`);
     }
     if(rq) info.push(`スタッフの希望: <b>${reqLabel(rq)}</b>`);
+    // 扶養内のスタッフは、その月の見込み額と残額を店長がその場で確認できるようにする
+    if(fuyouTarget(u)){
+      const f = fuyouOf(u, parseD(ds).getFullYear(), parseD(ds).getMonth());
+      info.push(`扶養: 累計 ${yenLabel(f.acc)} ＋ 当月見込み ${yenLabel(f.est)} ＝ <b>${yenLabel(f.total)}</b>／上限 ${yenLabel(f.limit)}　`
+        + (f.over ? `<b style="color:var(--danger)">${yenLabel(-f.rest)} 超過見込み</b>` : `残り ${yenLabel(f.rest)}`));
+    }
     const infoArea = info.length ? `<p class="small" style="background:#f7f8fb; border-radius:8px; padding:8px 10px;">${info.join("<br>")}</p>` : "";
 
     let body = "";
-    if(st.mode === "pattern"){
-      body += `<div class="opt-grid">` + storePatterns(storeId).map(p =>
-        `<button class="btn btn-lg" style="border-left:5px solid ${p.color}" onclick="A.setCellPattern(${storeId},${userId},'${ds}',${p.id})">${esc(p.name)}（${p.start}〜${p.end}）</button>`).join("") + `</div>`;
+    // 自由時間制の店舗でもパターンを使える(あてはめてから下の時刻指定で微調整できる)
+    if(pats.length){
+      body += `<div class="opt-grid">` + pats.map(p =>
+        `<button class="btn btn-lg" style="border-left:5px solid ${p.color}" onclick="A.setCellPattern(${storeId},${userId},'${ds}',${p.id})">${esc(p.name)}（${p.start}〜${p.end}／${patBreakText(p)}）</button>`).join("") + `</div>`;
     }
-    const defS = sh ? sh.start : (st.mode === "pattern" ? storePatterns(storeId)[0].start : "10:00");
-    const defE = sh ? sh.end : (st.mode === "pattern" ? storePatterns(storeId)[0].end : "18:00");
+    // 既定値: 既存シフト → 店舗のパターン(パターン制) → 10:00＋雇用形態の既定(拘束)
+    const usePat = st.mode === "pattern" && pats.length;
+    const defS = sh ? sh.start : (usePat ? pats[0].start : "10:00");
+    const defE = sh ? sh.end : (usePat ? pats[0].end : mt(Math.min(1440, tm("10:00") + spanMinIn(state, u))));
     body += `<div class="frow" style="margin-top:6px;"><label style="min-width:0;">時刻指定</label>
       ${timeSel("", defS).replace("<select", '<select id="sh-start"')} 〜 ${timeSel("", defE).replace("<select", '<select id="sh-end"')}
     </div>
     <button class="btn btn-lg btn-primary" onclick="A.setCellTime(${storeId},${userId},'${ds}')">この時刻で保存</button>`;
-    if(sh) body += `<button class="btn btn-lg btn-danger" style="margin-top:8px;" onclick="A.delCell(${storeId},${userId},'${ds}')">シフトを削除（休みにする）</button>`;
+    // 有給はスタッフ申請と同じデータ(requestsのpaid_leave)として登録する
+    body += isLeave(rq)
+      ? `<button class="btn btn-lg" style="margin-top:8px;" onclick="A.clearCellLeave(${storeId},${userId},'${ds}')">有給を取り消す</button>`
+      : `<button class="btn btn-lg" style="margin-top:8px;" onclick="A.setCellLeave(${storeId},${userId},'${ds}')">🏖 有給にする</button>`;
+    if(sh) body += `<button class="btn btn-lg btn-danger" style="margin-top:8px;" onclick="A.delCell(${storeId},${userId},'${ds}')">シフトを削除（公休にする）</button>`;
 
     openModal(`${mdlHead(esc(u.name) + "｜" + jdate(ds))}${infoArea}${body}`);
   },
@@ -1012,6 +1636,35 @@ const A = {
     }
     saveState(); closeModal(); render(); toast(msg);
   },
+  // 店長側の有給登録。スタッフの「有給申請」と同じ requests(paid_leave) に書く
+  setCellLeave(storeId, userId, ds){
+    const sh = shiftAt(userId, ds);
+    if(sh) state.shifts = state.shifts.filter(s => s !== sh);
+    state.requests = state.requests.filter(r => !(r.userId === userId && r.date === ds));
+    state.requests.push({
+      id: state.seq++, storeId, userId, date: ds, type:"paid_leave",
+      start:null, end:null, patternId:null, status:"submitted", createdAt: new Date().toISOString()
+    });
+    let msg = "有給として登録しました";
+    if(sh && sh.status === "published" && isPublishedMonth(storeId, ymOf(ds))){
+      notify(userId, "シフト変更のお知らせ", `${jdate(ds)}が有給になりました（${storeOf(storeId).name}）`);
+      msg = "有給として登録し、本人に差分通知を送りました";
+    }
+    saveState(); closeModal(); render(); toast(msg);
+  },
+  clearCellLeave(storeId, userId, ds){
+    state.requests = state.requests.filter(r => !(r.userId === userId && r.date === ds && r.type === "paid_leave"));
+    // 取り消し後の見え方は月の状態で変わる(作成済み=公休 / 未作成=まだ未定)
+    const after = isMadeMonth(storeId, ymOf(ds)) ? "公休になります" : "この日はまだ未定に戻ります";
+    let msg = `有給を取り消しました（${after}）`;
+    // 登録時(setCellLeave)は通知するのに取消は無通知、では本人が予定を戻せない
+    if(isPublishedMonth(storeId, ymOf(ds))){
+      notify(userId, "シフト変更のお知らせ",
+        `${jdate(ds)}の有給が取り消しになりました（${after}／${storeOf(storeId).name}）`);
+      msg = "有給を取り消し、本人に差分通知を送りました";
+    }
+    saveState(); closeModal(); render(); toast(msg);
+  },
   delCell(storeId, userId, ds){
     const sh = shiftAt(userId, ds);
     if(!sh) return;
@@ -1041,6 +1694,7 @@ const A = {
     if(!drafts.length){ toast("公開する下書きがありません"); return; }
     drafts.forEach(s => s.status = "published");
     state.publishedMonths[storeId + ":" + ym] = true;
+    state.createdMonths[storeId + ":" + ym] = true;
     const st = storeOf(storeId);
     const mem = members(storeId);
     mem.forEach(u => notify(u.id, "シフト公開のお知らせ", `${st.name}の${m+1}月シフトが公開されました。アプリで確認してください。`));
@@ -1048,14 +1702,311 @@ const A = {
     toast(`${m+1}月のシフトを公開し、スタッフ${mem.length}名に通知しました`);
   },
 
+  /* ----- 印刷 / CSV ----- */
+  printSheet(){ stampNow(); window.print(); },
+  exportCsv(storeId){
+    const [y, m] = monthAt(ui.mgrMonthOffset);
+    const rows = shiftCsvRows(storeId, y, m);
+    if(rows.length <= 1){ toast("この月のシフトはまだありません"); return; }
+    const st = storeOf(storeId);
+    const draftN = state.shifts.filter(s => s.storeId === storeId && ymOf(s.date) === ymKey(y, m) && s.status === "draft").length;
+    // 下書きは確定版と取り違えないようファイル名で区別する(列仕様は変えない)
+    const fname = `シフト_${fileSafe(st.name)}_${ymKey(y, m)}${draftN ? "_下書き" : ""}.csv`;
+    saveTextFile(fname, buildCsv(rows), "text/csv;charset=utf-8");
+    toast(`${rows.length - 1}件をCSVに書き出しました${draftN ? "（下書き含む）" : ""}`);
+  },
+
   /* ----- オーナー ----- */
   ownerOpen(storeId){ ui.ownerStore = storeId; ui.mgrMonthOffset = 1; ui.mgrScreen = "grid"; render(); },
-  ownerBack(){ ui.ownerStore = null; ui.mgrScreen = "grid"; ui.condDraft = null; render(); },
+  ownerBack(){
+    ui.ownerStore = null; ui.mgrScreen = "grid"; ui.condDraft = null;
+    ui.ownerScreen = "dash"; ui.setDraft = null;
+    render();
+  },
+
+  /* ----- 個人設定(スタッフごと・その場で保存) -----
+     動的な文字列(名前・雇用形態)はJS引数に埋め込まず、必ずユーザーIDで受け渡す */
+  openStaffSettings(){ ui.ownerScreen = "staff"; ui.setDraft = null; render(); },
+  openUser(userId){
+    const u = userOf(userId); if(!u) return;
+    const [y, m] = monthAt(ui.mgrMonthOffset);
+    const types = Object.keys((state.settings && state.settings.employmentDefaults) || {});
+    if(!types.includes(u.type)) types.unshift(u.type);
+    const typeOpts = types.map(t =>
+      `<option value="${esc(t)}" ${t === u.type ? "selected" : ""}>${esc(t)}</option>`).join("");
+    const dowChks = DOWK.map((k, i) =>
+      `<label class="chk"><input type="checkbox" id="us-dow-${k}" ${(!u.availableDays || u.availableDays.includes(k)) ? "checked" : ""}>${DOWJ[i]}</label>`).join("");
+    const dep = isDependent(u);
+    // 計算結果(扶養外・時給未設定なら計算対象外と明示する)
+    let box;
+    if(fuyouTarget(u)){
+      const f = fuyouOf(u, y, m);
+      const [cy2, cm2] = monthAt(0);
+      // 表示月が来月なら、累計には今月ぶんの「見込み」が含まれる。そこを隠さず書く
+      const accLabel = (y*12+m) > (cy2*12+cm2) ? `年初〜前月の累計（${cm2+1}月分は見込み）` : "年初〜先月の累計（実績）";
+      box = `<div class="fuyou-box">
+        <div><b>${y}年${m+1}月時点の扶養計算</b>（実働時間 × 時給）</div>
+        <div>${accLabel}　${yenLabel(f.acc)}</div>
+        <div>${y}年${m+1}月の見込み　${yenLabel(f.est)}</div>
+        <div>合計　<b>${yenLabel(f.total)}</b>　／　上限 ${yenLabel(f.limit)}</div>
+        <div>${f.over ? `<span class="ov">⚠ ${yenLabel(-f.rest)} 超過見込み</span>` : `残り ${yenLabel(f.rest)}`}</div>
+      </div>`;
+    }else{
+      box = `<div class="fuyou-box">扶養計算の対象外です（${dep ? "時給が未設定" : "扶養外"}）。</div>`;
+    }
+    openModal(`${mdlHead(esc(u.name) + "｜個人設定")}
+      ${box}
+      <div class="frow"><label>雇用形態</label><select class="tsel" id="us-type">${typeOpts}</select></div>
+      <div class="frow"><label>週の最大勤務日数</label>
+        <input type="number" id="us-week" min="1" max="7" value="${u.weeklyMaxDays ?? ""}" placeholder="空=制限なし"> 日
+        <span class="small muted">空欄＝制限なし</span></div>
+      <div class="frow"><label>出勤可能曜日</label></div>
+      <div class="chk-grid" style="margin-bottom:10px;">${dowChks}</div>
+      <div class="frow"><label>時給</label>
+        <input type="number" id="us-wage" min="0" max="100000" step="10" style="width:100px;" value="${u.wage ?? ""}" placeholder="空=なし"> 円</div>
+      <div class="frow"><label>年初〜先月の累計額</label>
+        <input type="number" id="us-ytd" min="0" max="99999999" step="1000" style="width:130px;" value="${u.ytdYen ?? 0}"> 円</div>
+      <div class="frow"><label>扶養の区分</label>
+        <select class="tsel" id="us-dep">
+          <option value="in" ${dep?"selected":""}>扶養内（計算・警告の対象）</option>
+          <option value="out" ${dep?"":"selected"}>扶養外（対象外）</option>
+        </select></div>
+      <p class="small muted" style="margin:0 0 10px;">休憩は個人ごとには設定しません（パターンの設定 → 無ければ休憩の自動ルール、の2段階で決まります）。</p>
+      <button class="btn btn-lg btn-primary" onclick="A.saveUser(${userId})">保存する</button>`);
+  },
+  saveUser(userId){
+    const u = userOf(userId); if(!u) return;
+    const type = document.getElementById("us-type").value;
+    const wk   = document.getElementById("us-week").value.trim();
+    const wage = document.getElementById("us-wage").value.trim();
+    const ytd  = document.getElementById("us-ytd").value.trim();
+    const dep  = document.getElementById("us-dep").value === "in";
+    const days = DOWK.filter(k => { const el = document.getElementById("us-dow-" + k); return el && el.checked; });
+    if(wk !== ""){
+      const n = Number(wk);
+      if(!isFinite(n) || n < 1 || n > 7){ toast("週の最大勤務日数は1〜7日で入力してください"); return; }
+    }
+    if(!days.length){ toast("出勤可能曜日を1つ以上選んでください"); return; }
+    if(wage !== ""){
+      const n = Number(wage);
+      if(!isFinite(n) || n < 0 || n > 100000){ toast("時給は0〜100,000円で入力してください"); return; }
+    }
+    const yn = ytd === "" ? 0 : Number(ytd);
+    if(!isFinite(yn) || yn < 0 || yn > 99999999){ toast("累計額は0〜99,999,999円で入力してください"); return; }
+
+    u.type = type;
+    u.weeklyMaxDays = wk === "" ? null : Number(wk);
+    u.availableDays = days.length === 7 ? null : days;   // 全曜日可なら制限なしとして持つ
+    u.wage = wage === "" ? null : Number(wage);
+    u.ytdYen = yn;
+    u.dependent = dep;
+    saveState(); closeModal(); render();
+    toast(`${u.name}さんの個人設定を保存しました`);
+  },
+
+  /* ----- 共通設定(全店舗) ----- */
+  // 編集中は下書き(ui.setDraft)に溜め、「保存する」で初めて state に反映する
+  openCommonSettings(){
+    ui.ownerScreen = "settings";
+    ui.setDraft = {
+      employmentDefaults: JSON.parse(JSON.stringify(state.settings.employmentDefaults)),
+      breakTiers: JSON.parse(JSON.stringify(breakTiersIn(state))),
+      fuyouLimit: fuyouLimit(),
+      patterns: JSON.parse(JSON.stringify(state.patterns)),
+      stores: state.stores.map(s => ({ id:s.id, name:s.name, mode:s.mode, color:s.color, patternIds:(s.patternIds||[]).slice() }))
+    };
+    render();
+  },
+  // 雇用形態は名前でなくインデックスで受け取る(名前をJS文字列に埋め込まない)
+  empField(idx, key, val){
+    const t = Object.keys(ui.setDraft.employmentDefaults)[idx];
+    const e = t != null ? ui.setDraft.employmentDefaults[t] : null; if(!e) return;
+    const n = Number(val);
+    if(!isFinite(n) || n <= 0){ toast("実働時間は0時間より大きい値を入力してください"); render(); return; }
+    // 上限を超える値はグリッド・CSVに異常な時刻を出すのでここで止める
+    if(n * 60 > MAX_WORK_MIN){ toast(`実働時間は${MAX_WORK_MIN/60}時間までです`); render(); return; }
+    if(key === "work") e.workMin = Math.round(n * 60);
+    render();
+  },
+  // 休憩の段階制ルール(拘束の閾値・休憩分)を編集する
+  tierField(i, key, val){
+    const t = ui.setDraft.breakTiers[i]; if(!t) return;
+    const n = Number(val);
+    if(!isFinite(n) || n < 0){ render(); return; }
+    if(key === "break"){
+      // 上限なしだと最終段(上限なしの段)に極端な値が入り、実働がマイナスのシフトができる
+      if(n > MAX_BREAK_MIN){ toast(`休憩は${MAX_BREAK_MIN}分までです`); render(); return; }
+      t.breakMin = Math.round(n);
+    }
+    else if(t.spanMaxMin != null){
+      const h = key === "h" ? Math.round(n) : Math.floor(t.spanMaxMin / 60);
+      const mm = key === "m" ? Math.round(n) : t.spanMaxMin % 60;
+      t.spanMaxMin = Math.min(24*60, h * 60 + mm);
+    }
+    render();
+  },
+  fuyouLimitField(val){
+    const n = Number(val);
+    if(!isFinite(n) || n < 0){ render(); return; }
+    ui.setDraft.fuyouLimit = Math.round(n);
+  },
+  storePat(storeId, patId, checked){
+    const st = ui.setDraft.stores.find(s => s.id === storeId); if(!st) return;
+    st.patternIds = st.patternIds.filter(id => id !== patId);
+    // 表示順はパターン一覧の並びに合わせる
+    if(checked) st.patternIds = ui.setDraft.patterns.filter(p => p.id === patId || st.patternIds.includes(p.id)).map(p => p.id);
+    render();
+  },
+  editPattern(id){
+    const d = ui.setDraft;
+    const p = id != null ? d.patterns.find(x => x.id === id) : null;
+    const cur = p || { name:"", start:"09:00", end:"17:00", breakMin:null, color:"#F2B441" };
+    const auto = cur.breakMin == null;
+    const autoMin = breakByTiers(d.breakTiers, tm(cur.end) - tm(cur.start));
+    openModal(`${mdlHead(p ? "パターンを編集" : "パターンを追加")}
+      <div class="frow"><label>名前</label>
+        <input type="text" id="pt-name" value="${esc(cur.name)}" placeholder="例: A ／ 早番" maxlength="12"></div>
+      <div class="frow"><label>時間（拘束）</label>
+        ${timeSel("A.patBreakRefresh()", cur.start).replace("<select", '<select id="pt-start"')} 〜 ${timeSel("A.patBreakRefresh()", cur.end).replace("<select", '<select id="pt-end"')}</div>
+      <div class="frow"><label>休憩</label>
+        <select class="tsel" id="pt-break-mode" onchange="A.patBreakMode(this.value)">
+          <option value="auto" ${auto?"selected":""}>自動（ルールで決める）</option>
+          <option value="manual" ${auto?"":"selected"}>手動で指定</option>
+        </select>
+        <span id="pt-break-manual" style="${auto?"display:none;":""}">
+          <input type="number" id="pt-break" min="0" max="240" step="5" value="${auto?autoMin:cur.breakMin}"> 分</span>
+        <span id="pt-break-auto" class="small muted" style="${auto?"":"display:none;"}">この拘束時間なら ${autoMin}分（休憩の自動ルール）</span>
+      </div>
+      <div class="frow"><label>色</label><input type="color" id="pt-color" value="${cur.color}"></div>
+      <p class="small muted" style="margin:0 0 10px;">「自動」は共通設定の<b>休憩の自動ルール（段階制）</b>で決まります。「手動」なら0分も明示的に指定できます。</p>
+      <button class="btn btn-lg btn-primary" onclick="A.savePattern(${p ? p.id : "null"})">保存する</button>`);
+  },
+  // 休憩の 自動/手動 切替(モーダル内の表示だけ差し替える)
+  patBreakMode(mode){
+    const man = document.getElementById("pt-break-manual");
+    const aut = document.getElementById("pt-break-auto");
+    if(!man || !aut) return;
+    if(mode === "auto"){
+      const s = document.getElementById("pt-start").value, e = document.getElementById("pt-end").value;
+      const n = tm(e) > tm(s) ? breakByTiers(ui.setDraft.breakTiers, tm(e) - tm(s)) : 0;
+      aut.textContent = `この拘束時間なら ${n}分（休憩の自動ルール）`;
+      man.style.display = "none"; aut.style.display = "";
+    }else{
+      man.style.display = ""; aut.style.display = "none";
+    }
+  },
+  patBreakRefresh(){
+    const sel = document.getElementById("pt-break-mode");
+    if(sel) this.patBreakMode(sel.value);
+  },
+  savePattern(id){
+    const d = ui.setDraft;
+    const name = document.getElementById("pt-name").value.trim();
+    const s = document.getElementById("pt-start").value;
+    const e = document.getElementById("pt-end").value;
+    const auto = document.getElementById("pt-break-mode").value === "auto";
+    const br = auto ? null : Number(document.getElementById("pt-break").value);
+    const color = document.getElementById("pt-color").value;
+    if(!name){ toast("パターン名を入力してください"); return; }
+    if(tm(e) <= tm(s)){ toast("終了時刻は開始時刻より後にしてください"); return; }
+    if(!auto){
+      if(!isFinite(br) || br < 0){ toast("休憩は0分以上で入力してください"); return; }
+      if(br >= tm(e) - tm(s)){ toast("休憩が拘束時間以上です（実働が0になります）"); return; }
+    }
+    if(d.patterns.some(p => p.name === name && p.id !== id)){ toast("同じ名前のパターンがあります"); return; }
+    if(id != null){
+      const p = d.patterns.find(x => x.id === id);
+      p.name = name; p.start = s; p.end = e; p.breakMin = auto ? null : br; p.color = color;
+    }else{
+      // 既存のシフト・希望が参照しているIDと衝突しないよう連番から採番する
+      d.patterns.push({ id: state.seq++, name, start:s, end:e, breakMin: auto ? null : br, color });
+    }
+    // 手動休憩が自動ルールを下回る場合は保存は通すが警告する(明示の上書きなので止めはしない)
+    const need = auto ? 0 : breakByTiers(d.breakTiers, tm(e) - tm(s));
+    closeModal(); render();
+    if(!auto && br < need)
+      toast(`⚠ 休憩${br}分は自動ルール（この拘束時間なら${need}分）を下回ります。労働基準法の休憩を確認してください`);
+  },
+  askDelPattern(id){
+    const p = ui.setDraft.patterns.find(x => x.id === id); if(!p) return;
+    const shN  = state.shifts.filter(s => s.patternId === id).length;
+    const pubN = state.shifts.filter(s => s.patternId === id && s.status === "published").length;
+    const rqN  = state.requests.filter(r => r.type === "pattern" && r.patternId === id).length;
+    const warn = (shN || rqN)
+      ? `<p class="small">このパターンは<b>作成済みシフト${shN}件</b>（うち<b>公開済み ${pubN}件</b>）・<b>提出済みの希望${rqN}件</b>で使われています。<br>
+         <b>公開済みのシフトも対象です。</b>削除しても時刻は残りますが、スタッフのカレンダーの表示が
+         「${esc(p.name)}」から「${p.start}-${p.end}」（時刻のみ）に変わります（希望は時間指定に変わります）。<br>
+         <b>この操作は元に戻せません。</b></p>`
+      : `<p class="small">このパターンはまだ使われていません。<br><b>この操作は元に戻せません。</b></p>`;
+    openModal(`${mdlHead("パターンを削除")}
+      <p class="small"><b>${esc(p.name)}（${p.start}〜${p.end}）</b>を削除します。</p>${warn}
+      <div class="opt-grid">
+        <button class="btn btn-lg btn-danger" onclick="A.delPattern(${id})">削除する</button>
+        <button class="btn btn-lg" onclick="A.closeModal()">キャンセル</button>
+      </div>`);
+  },
+  delPattern(id){
+    const d = ui.setDraft;
+    d.patterns = d.patterns.filter(p => p.id !== id);
+    d.stores.forEach(s => s.patternIds = s.patternIds.filter(pid => pid !== id));
+    closeModal(); render();
+  },
+  saveCommonSettings(){
+    const d = ui.setDraft;
+    // 雇用形態の既定: 実働0時間は自動生成が破綻する。上限を超えると異常な時刻のシフトができる
+    const badEmp = Object.keys(d.employmentDefaults).find(t => !(d.employmentDefaults[t].workMin > 0));
+    if(badEmp){ toast(`${badEmp}の実働時間を0時間より大きくしてください`); return; }
+    const overEmp = Object.keys(d.employmentDefaults).find(t => d.employmentDefaults[t].workMin > MAX_WORK_MIN);
+    if(overEmp){ toast(`${overEmp}の実働時間は${MAX_WORK_MIN/60}時間までです`); return; }
+    // 休憩の段階制ルール: 閾値は昇順・休憩は拘束より短いこと(実働が0以下にならない)
+    const tiers = d.breakTiers;
+    for(let i = 0; i < tiers.length; i++){
+      const t = tiers[i];
+      // 休憩分は全段で検証する(最終段=上限なしの段もここを通す。素通りすると実働がマイナスになる)
+      if(!(t.breakMin >= 0) || t.breakMin > MAX_BREAK_MIN){
+        toast(`休憩ルール${i+1}段目の休憩は0〜${MAX_BREAK_MIN}分で入力してください`); return;
+      }
+      if(t.spanMaxMin != null){
+        if(!(t.spanMaxMin > 0)){ toast(`休憩ルール${i+1}段目の拘束時間を入力してください`); return; }
+        const prev = i > 0 ? tiers[i-1].spanMaxMin : null;
+        if(prev != null && t.spanMaxMin <= prev){ toast("休憩ルールの拘束時間は上から順に長くしてください"); return; }
+        if(t.breakMin >= t.spanMaxMin){ toast(`休憩ルール${i+1}段目は休憩が拘束時間以上です`); return; }
+      }
+    }
+    // パターン制の店舗はパターンが0だとシフトを組めない
+    const badStore = d.stores.find(s => s.mode === "pattern" && !s.patternIds.length);
+    if(badStore){ toast(`${badStore.name}（パターン制）は使用パターンを1つ以上選んでください`); return; }
+    if(!(d.fuyouLimit > 0)){ toast("扶養の上限額を入力してください"); return; }
+
+    const removed = state.patterns.filter(p => !d.patterns.some(x => x.id === p.id));
+    state.settings.employmentDefaults = JSON.parse(JSON.stringify(d.employmentDefaults));
+    state.settings.breakTiers = JSON.parse(JSON.stringify(d.breakTiers));
+    state.settings.fuyou = { limitYen: d.fuyouLimit };
+    state.patterns = JSON.parse(JSON.stringify(d.patterns));
+    d.stores.forEach(s => { const st = storeOf(s.id); if(st) st.patternIds = s.patternIds.slice(); });
+
+    // 削除されたパターンの後始末(時刻は消さずに残す)
+    removed.forEach(p => {
+      state.shifts.forEach(s => { if(s.patternId === p.id) s.patternId = null; });
+      state.requests.forEach(r => {
+        if(r.type === "pattern" && r.patternId === p.id){
+          r.type = "time"; r.start = p.start; r.end = p.end; r.patternId = null;
+        }
+      });
+      Object.keys(state.conditions).forEach(k => {
+        const c = state.conditions[k];
+        if(c && c.patternRatio) delete c.patternRatio[p.id];
+      });
+    });
+    saveState();
+    ui.ownerScreen = "dash"; ui.setDraft = null;
+    render(); toast("共通設定を保存しました");
+  },
 
   /* ----- 設定 ----- */
   openSettings(){
     openModal(`${mdlHead("設定")}
-      <p class="small muted">シフト作成システム 営業デモ版 v1.0<br>
+      <p class="small muted">シフト作成システム 営業デモ版 v1.4<br>
       データはこの端末のブラウザ内（localStorage）にのみ保存されます。サーバー送信はありません。</p>
       <div class="opt-grid">
         <button class="btn btn-lg btn-danger" onclick="A.confirmReset()">🔄 デモデータにリセット</button>
@@ -1089,6 +2040,8 @@ try{
   if(view && view.role === "staff" && !userOf(view.userId)) view = null;
   if(view && view.role === "manager" && !storeOf(view.storeId)) view = null;
 }catch(e){ view = null; }
+// ブラウザのメニューやCtrl+Pから印刷された場合も出力日時を最新にする
+window.addEventListener("beforeprint", stampNow);
 render();
 </script>
 </body>
