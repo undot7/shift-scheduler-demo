@@ -115,6 +115,29 @@
   }
   .chip.ghost{background:var(--gray-chip); color:#767e8c; font-weight:600;}
   .chip.leave{background:#eef3ff; color:#3559c7; border:1px solid #c3d3ff; font-weight:700;}
+  /* 自由時間制のシフトチップだけ、店長グリッドの .sh-chip と同じ2行表示にする。
+     スマホ幅(390px)ではマスの内寸が約35pxしかなく「13:00-19:00」(約60px)が1行に入らず省略されるため。
+     時刻そのものは .chip の nowrap を継いだままにする(320px幅で「13:0 / 0」と割れるのを防ぐ)。
+     公休/有給(.ghost/.leave)は従来どおり */
+  .chip.cal-sh{
+    display:block; overflow:visible; text-overflow:clip;
+    padding:1px 2px; font-size:9.5px; line-height:1.2;
+  }
+  .chip.cal-sh .cs-end{display:block; font-size:9.5px; font-weight:700;}
+  /* パターン制のシフトチップ。見た目は従来の .chip のまま(10px・inline-block)で、
+     長いパターン名が省略されないよう折り返しだけ許可する */
+  .chip.cal-pt{white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:break-word;}
+  /* iPhone SE(320px)だけはマスが狭く、2文字のパターン名でも1行に入らないので左右の余白を詰める */
+  @media(max-width:340px){ .chip.cal-pt{padding-left:2px; padding-right:2px;} }
+  /* 希望提出タブのチップ。「希望休」「10:00-15:00」等がマス幅に収まらず省略されるため折り返し可にする。
+     .chip.ghost はカレンダーの「公休」にも使うので、希望提出側だけに効く別クラスにする */
+  .chip.cal-rq{
+    display:block; white-space:normal; overflow:visible; text-overflow:clip;
+    overflow-wrap:break-word; padding:1px 2px;
+  }
+  .chip.cal-rq .cs-end, .chip.cal-rq .rq-sfx{display:block; font-size:inherit; font-weight:inherit;}
+  /* 時間指定だけは時刻の途中で折れないようにする(320px幅で「10:0 / 0」と割れるのを防ぐ) */
+  .chip.cal-rq.rq-tm{white-space:nowrap;}
 
   /* ---------- manager grid ---------- */
   .mgr-toolbar{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;}
@@ -344,6 +367,16 @@
       border-radius:2px; font-size:8pt; padding:.3mm 1mm; white-space:normal; overflow:visible;
     }
     .chip .pr-time{display:block; font-size:7.5pt; font-weight:600; color:#3b414d;}
+    /* 紙は幅に余裕があるので画面の2行表示は持ち込まず、従来どおり「10:00-19:00」の1行に戻す
+       (.chip.cal-* は .chip より詳細度が高いので print 側でも明示的に上書きする) */
+    .chip.cal-sh{display:inline-block; font-size:8pt; padding:.3mm 1mm; line-height:inherit;}
+    .chip.cal-sh .cs-end{display:inline; font-size:inherit; font-weight:inherit;}
+    .chip.cal-sh .cs-end::before{content:"-";}
+    .chip.cal-pt{overflow-wrap:normal;}
+    .chip.cal-rq{display:inline-block; padding:.3mm 1mm; overflow-wrap:normal;}
+    .chip.cal-rq.rq-tm{white-space:normal;}
+    .chip.cal-rq .cs-end, .chip.cal-rq .rq-sfx{display:inline;}
+    .chip.cal-rq .cs-end::before{content:"-";}
     /* 個人分の公休/有給。シフトの色帯と紛れないよう左帯は付けない */
     .chip.ghost{border:.3pt dotted #98a0ac; color:#3b414d !important;}
     .chip.leave{border:.4pt solid #3b414d; color:#3b414d !important; font-weight:700;}
@@ -1011,8 +1044,9 @@ function staffShiftTab(me){
     const p = sh.patternId ? patternOf(sh.patternId) : null;
     if(p && p.start === sh.start && p.end === sh.end)
       // pr-time: 印刷時のみ表示。白黒でもパターンを判別できるよう時刻を必ず併記する
-      return `<span class="chip" style="background:${p.color}; --c:${p.color}">${esc(p.name)}<small class="pr-time">${sh.start}-${sh.end}</small></span>${leaveChip}`;
-    return `<span class="chip" style="background:${st.color}; --c:${st.color}">${sh.start}-${sh.end}</span>${leaveChip}`;
+      return `<span class="chip cal-pt" style="background:${p.color}; --c:${p.color}">${esc(p.name)}<small class="pr-time">${sh.start}-${sh.end}</small></span>${leaveChip}`;
+    // 開始/終了を別要素にして画面では2行・印刷では従来どおり1行(cs-end::before の "-")にする
+    return `<span class="chip cal-sh" style="background:${st.color}; --c:${st.color}">${sh.start}<small class="cs-end">${sh.end}</small></span>${leaveChip}`;
   };
   return seg + `<div class="card">
     <div class="print-head">
@@ -1035,11 +1069,13 @@ function staffReqTab(me){
   const cell = ds => {
     const r = reqAt(me.id, ds);
     if(!r) return "";
-    if(r.type === "day_off") return `<span class="chip ghost">希望休</span>`;
+    // cal-rq: スマホ幅だとマスに収まらず省略されるので折り返し可にする。
+    // 時間・パターン希望は途中で不自然に折れないよう2要素に分け、画面は2行・印刷は1行に戻す
+    if(r.type === "day_off") return `<span class="chip ghost cal-rq">希望休</span>`;
     if(r.type === "paid_leave") return `<span class="chip leave">有給</span>`;
-    if(r.type === "time") return `<span class="chip ghost">${r.start}-${r.end}</span>`;
-    if(r.type === "pattern"){ const p = patternOf(r.patternId); return `<span class="chip ghost">${esc(p?p.name:"?")}希望</span>`; }
-    return `<span class="chip ghost">${anyLabel(r.storeId)}</span>`;
+    if(r.type === "time") return `<span class="chip ghost cal-rq rq-tm">${r.start}<small class="cs-end">${r.end}</small></span>`;
+    if(r.type === "pattern"){ const p = patternOf(r.patternId); return `<span class="chip ghost cal-rq">${esc(p?p.name:"?")}<small class="rq-sfx">希望</small></span>`; }
+    return `<span class="chip ghost cal-rq">${anyLabel(r.storeId)}</span>`;
   };
   const myReqs = state.requests.filter(r => r.userId === me.id && ymOf(r.date) === ymKey(y,m))
     .sort((a,b) => a.date < b.date ? -1 : 1);
