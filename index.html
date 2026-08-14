@@ -115,6 +115,8 @@
   }
   .chip.ghost{background:var(--gray-chip); color:#767e8c; font-weight:600;}
   .chip.leave{background:#eef3ff; color:#3559c7; border:1px solid #c3d3ff; font-weight:700;}
+  /* 在籍期間外の日(入社前・退職後)。「公休」と誤読させないため地色を持たせない */
+  .chip.ghost.na{background:none; border:none; color:#aab0bc;}
   /* 自由時間制のシフトチップだけ、店長グリッドの .sh-chip と同じ2行表示にする。
      スマホ幅(390px)ではマスの内寸が約35pxしかなく「13:00-19:00」(約60px)が1行に入らず省略されるため。
      時刻そのものは .chip の nowrap を継いだままにする(320px幅で「13:0 / 0」と割れるのを防ぐ)。
@@ -178,6 +180,8 @@
     background:var(--gray-chip); color:#767e8c; font-weight:700; font-size:9.5px; line-height:1.25;
   }
   .off-chip.leave{background:#eef3ff; color:#3559c7; border:1px solid #c3d3ff;}
+  /* 在籍期間外の日(入社前・退職後)。公休チップと区別するため地色なし */
+  .off-chip.na{background:none; color:#aab0bc;}
   /* 「希望休由来の公休」だと店長が分かる補助表示。印刷では二重表記になるので出さない */
   .off-chip .oc-sub{display:block; font-weight:600; font-size:8px; opacity:.85;}
   .cell.conflict{outline:2px solid var(--danger); outline-offset:-2px;}
@@ -235,6 +239,14 @@
   .band-row{display:flex; align-items:center; gap:6px; margin-bottom:8px; flex-wrap:wrap;}
   .frow input[type=text]{border:1px solid var(--line); border-radius:8px; padding:7px 8px; font-size:14px; font-family:inherit; width:11em;}
   .frow input[type=color]{border:1px solid var(--line); border-radius:8px; padding:2px; width:52px; height:34px; background:#fff;}
+  .frow input[type=date]{border:1px solid var(--line); border-radius:8px; padding:7px 8px; font-size:14px; font-family:inherit; background:#fff;}
+
+  /* ---------- マスタ管理(店舗・スタッフ・ロール) ---------- */
+  .ms-off{opacity:.55;}                                   /* 無効化した店舗・退職したスタッフ */
+  .ms-grp{font-size:12.5px; font-weight:700; color:var(--muted); margin:12px 0 2px;}
+  .ms-lv{border:1px solid var(--line); border-radius:10px; padding:9px 10px; margin-bottom:8px;}
+  .ms-lv .lv-h{font-weight:700; font-size:13.5px;}
+  .ms-lv .lv-c{color:var(--muted); font-size:11.5px; margin-bottom:4px;}
 
   /* ---------- 共通設定(パターン一覧・店舗別の使用パターン) ---------- */
   .pat-row{display:flex; align-items:center; gap:9px; padding:8px 2px; border-bottom:1px solid var(--line);}
@@ -353,6 +365,8 @@
     }
     .off-chip.leave{border:.4pt solid #3b414d; font-weight:700;}
     .off-chip .oc-sub{display:none;}
+    /* 在籍期間外の日は枠なし(公休の点線枠と区別する)。文字は出す(白黒判読の思想を維持) */
+    .off-chip.na, .chip.ghost.na{border:none; background:#fff !important; color:#98a0ac !important;}
 
     /* 個人分(スタッフのシフト確認カレンダー) */
     .cal{gap:.8mm;}
@@ -405,9 +419,13 @@
 //  v4: 休憩を2層に統一(settings.breakTiers / 雇用形態の既定休憩を廃止)・扶養設定(時給/累計/扶養区分)を追加
 //  v5: 自由時間制の生成が終了時刻を閉店にスナップするようになり、シード済みシフトの時刻が変わった
 //      (旧v4のstateをそのまま読むと、シード済みの今月分が古い時刻のまま残り人員不足バッジが出る)
-const STATE_KEY = "ssd:state:v5";
-const OLD_STATE_KEYS = ["ssd:state:v1", "ssd:state:v2", "ssd:state:v3", "ssd:state:v4"];   // 残っていても使わないので掃除する
-const VIEW_KEY  = "ssd:view:v1";
+//  v6: ロール定義(state.roles)・スタッフの在籍期間(users[].joinDate/leaveDate)・
+//      店舗の無効化(stores[].archived)を追加
+const STATE_KEY = "ssd:state:v6";
+const OLD_STATE_KEYS = ["ssd:state:v1", "ssd:state:v2", "ssd:state:v3", "ssd:state:v4", "ssd:state:v5"];   // 残っていても使わないので掃除する
+// v2: view を {userId} に一本化(画面はロールの権限から導出する)。旧v1の形式は読めないので捨てる
+const VIEW_KEY  = "ssd:view:v2";
+const OLD_VIEW_KEYS = ["ssd:view:v1"];
 const MAX_DAY_OFF = 3;   // 希望休の上限(月・有給はこの枠に含めない)
 
 /* ---------------- date / time utils ---------------- */
@@ -431,14 +449,15 @@ function monthAt(offset){ const n = new Date(); const d = new Date(n.getFullYear
 
 /* ---------------- state ---------------- */
 let state = null;
-let view  = null; // {role:'owner'} | {role:'manager',storeId} | {role:'staff',userId} | null
+// view は「誰の視点か」だけを持つ。表示する画面はその人のロールの権限から導出する(uiModeOf)
+let view  = null; // { userId } | null
 const ui = {
   staffTab:"shift", staffCalOffset:0, mgrMonthOffset:1, mgrScreen:"grid",
   // スタッフの「シフト」タブ内の表示切替 "mine"(自分のシフト) | "store"(店舗全体)。
   // localStorageには持たない(保存データの構造を変えないため。リロードで "mine" に戻る)
   staffShiftView:"mine",
   ownerStore:null, condDraft:null,
-  ownerScreen:"dash",   // "dash" | "settings"(共通設定)
+  ownerScreen:"dash",   // "dash" | "settings"(共通設定) | "staff"(個人設定一覧) | "master"(マスタ管理)
   setDraft:null         // 共通設定の編集中データ(保存するまで state に反映しない)
 };
 
@@ -463,10 +482,12 @@ function seedState(){
     return u;
   });
   const s = {
-    version: 5, seq: 1000,
+    version: 6, seq: 1000,
     tenant: DEMO_DATA.tenant,
     stores: JSON.parse(JSON.stringify(DEMO_DATA.stores)),
     patterns: JSON.parse(JSON.stringify(DEMO_DATA.patterns)),
+    // ロール定義(階層レベル制)。上位の段は下位の権限を全て含む
+    roles: JSON.parse(JSON.stringify(DEMO_DATA.roles)),
     users: seedUsers,
     conditions: JSON.parse(JSON.stringify(DEMO_DATA.conditions)),
     settings: JSON.parse(JSON.stringify(DEMO_DATA.settings)),
@@ -502,7 +523,7 @@ function loadState(){
     const raw = localStorage.getItem(STATE_KEY);
     if(raw){
       const s = JSON.parse(raw);
-      if(s && s.version === 5) return s;
+      if(s && s.version === 6) return s;
     }
   }catch(e){ console.error("state load failed, reseeding", e); }
   const s = seedState();
@@ -521,8 +542,10 @@ const patternsIn = (st8, storeId) => {
   return ((st && st.patternIds) || []).map(id => st8.patterns.find(p => p.id === id)).filter(Boolean);
 };
 const storePatterns = storeId => patternsIn(state, storeId);
-const members = storeId => state.users.filter(u => u.storeId === storeId)
-  .sort((a,b) => (a.role === "manager" ? -1 : 1) - (b.role === "manager" ? -1 : 1) || a.id - b.id);
+// ※ 旧 members(storeId)(現所属だけで絞る版)は削除した。月・在籍の概念が抜けるため使わない。
+//    月次の一覧・印刷・通知・扶養集計は必ず下の membersFor(storeId, y, m) を使うこと
+// 無効化(アーカイブ)していない店舗。物理削除はしないので、一覧はこれで絞る
+const activeStores = () => state.stores.filter(s => !s.archived);
 const shiftAt = (userId, ds) => state.shifts.find(s => s.userId === userId && s.date === ds);
 const reqAt   = (userId, ds) => state.requests.find(r => r.userId === userId && r.date === ds);
 // 有給はスタッフ申請・店長のセル編集のどちらから入れても requests の paid_leave として持つ
@@ -534,6 +557,67 @@ const isPublishedMonth = (storeId, ym) => !!state.publishedMonths[storeId + ":" 
 // 手動で数セル入れただけの月はここに入らない(＝割当のない日を公休と断定しない)
 const isMadeMonth = (storeId, ym) =>
   !!state.createdMonths[storeId + ":" + ym] || isPublishedMonth(storeId, ym);
+
+/* ---------------- 在籍期間(入社日・退職日) ----------------
+   joinDate/leaveDate は任意項目。未設定＝制限なし。
+   退職日は「最終在籍日」= その日までは勤務可・翌日から在籍外
+   --------------------------------------------------------- */
+const activeOn = (u, ds) =>
+  (!u.joinDate || ds >= u.joinDate) && (!u.leaveDate || ds <= u.leaveDate);
+// その月に1日でも在籍しているか(月次の一覧・印刷・通知に出すかの判定)
+const activeInMonth = (u, y, m) =>
+  (!u.joinDate || u.joinDate <= dstr(y, m, dim(y, m))) &&
+  (!u.leaveDate || u.leaveDate >= dstr(y, m, 1));
+const retired = u => !!u.leaveDate && u.leaveDate < todayStr();   // 退職日当日はまだ在籍
+
+// その月のグリッド・印刷・通知・扶養集計に出す人
+//  = 現所属がこの店舗で在籍期間がその月と重なる人
+//    ∪ その月にこの店舗のシフトまたは希望データを持つ人(転属・退職後の実績表示用)
+function membersFor(storeId, y, m){
+  const ym = ymKey(y, m);
+  return state.users.filter(u =>
+      (u.storeId === storeId && activeInMonth(u, y, m))
+      || state.shifts.some(s => s.storeId === storeId && s.userId === u.id && ymOf(s.date) === ym)
+      || state.requests.some(r => r.storeId === storeId && r.userId === u.id && ymOf(r.date) === ym))
+    .sort((a,b) => (a.role === "manager" ? -1 : 1) - (b.role === "manager" ? -1 : 1) || a.id - b.id);
+}
+
+/* ---------------- 権限(階層レベル制) ----------------
+   ロールは段(level)を持ち、上位の段は下位の権限を全て含む。
+   逆転した権限(公開はできるが編集はできない等)は構造的に作れない。
+   権限は「その権限を使える最小の段」で定義する
+   ---------------------------------------------------- */
+const PERM_LEVELS = {
+  edit:        2,   // シフト編集(自店舗のグリッド・セル編集・自動生成・条件設定・個人設定を開く)
+  publish:     3,   // シフトの公開
+  wage:        4,   // 時給・扶養の閲覧・編集
+  master:      5,   // マスタ管理(店舗・スタッフ・ロール)＋共通設定
+  otherStores: 5    // 他店舗の閲覧(全店舗ダッシュボード)
+};
+const MAX_LEVEL = 5;
+// 段のキャプション(ロール管理・視点選択の説明に使う)
+const LEVEL_CAPS = {
+  1: "自分のシフト閲覧・希望提出・通知",
+  2: "＋ 自店舗のシフト表閲覧・セル編集・自動生成・条件設定",
+  3: "＋ シフトの公開",
+  4: "＋ 時給・扶養の閲覧・編集",
+  5: "＋ 全店舗の閲覧・マスタ管理・共通設定"
+};
+const roleOf  = u => state.roles.find(r => r.id === u.role)
+                  || state.roles.find(r => r.id === "staff");   // 参照切れは最小権限に落とす
+const levelOf = u => roleOf(u).level;
+const can     = (u, perm) => levelOf(u) >= PERM_LEVELS[perm];
+// 既定の3ロールはシステム前提(店長=1店舗1人の公開者/オーナー=最上位/スタッフ=最下位)。段の変更・削除はできない
+const isFixedRole = id => id === "owner" || id === "manager" || id === "staff";
+// いま操作している視点の人。権限判定は常にこの人に対して行う
+const viewer = () => (view ? userOf(view.userId) : null);
+const vcan = perm => { const u = viewer(); return !!u && can(u, perm); };
+// 視点 → 画面の導出
+function uiModeOf(u){
+  if(can(u, "otherStores")) return "owner";           // 全店舗ダッシュボード
+  if(can(u, "edit") && u.storeId) return "manager";   // 自店舗のグリッド
+  return "staff";                                     // スタッフUI
+}
 
 /* ---------------- 勤務時間の既定・休憩 ----------------
    休憩の決まり方は2層に統一している(3層にすると破綻するため増やさないこと):
@@ -642,7 +726,7 @@ function fuyouOf(u, y, m){
   return { limit, acc, est, total, rest: limit - total, over: total > limit };
 }
 // 対象月に扶養超過が見込まれる店舗メンバー
-const fuyouOverMembers = (storeId, y, m) => members(storeId)
+const fuyouOverMembers = (storeId, y, m) => membersFor(storeId, y, m)
   .filter(u => fuyouTarget(u) && fuyouOf(u, y, m).over);
 
 function notify(userId, title, body){
@@ -722,6 +806,9 @@ function generateForMonth(st8, storeId, y, m){
   const hasOffReq = (uid, ds) => (reqsByDate[ds] || [])
     .some(r => r.userId === uid && (r.type === "day_off" || r.type === "paid_leave"));
   const canAssign = (u, ds, forRequest) => {
+    // 在籍期間外(入社前・退職後)は希望由来でも割当てない。
+    // 判定は日付文字列の比較のみ＝乱数・時刻に依存しない(生成の決定性は維持される)
+    if(!activeOn(u, ds)) return false;
     if(dates.get(u.id).has(ds)) return false;
     if(hasOffReq(u.id, ds)) return false;
     // 明示的な希望提出日(時間指定・パターン希望)は本人の希望を最優先し、
@@ -925,28 +1012,34 @@ const app = document.getElementById("app");
 
 function render(){
   let html = "";
+  const me = viewer();
+  // 画面はロールの権限から導出する(同じ店長画面でも、公開・給与は段によって出し分ける)
+  const mode = me ? uiModeOf(me) : null;
   if(!view){ html = hdrHtml() + viewSelectHtml(); }
-  else if(view.role === "staff"){ html = hdrHtml() + staffHtml(); }
-  else if(view.role === "manager"){ html = hdrHtml() + `<div class="wrap no-tab">${managerHtml(view.storeId)}</div>`; }
-  else if(view.role === "owner"){
+  else if(mode === "staff"){ html = hdrHtml() + staffHtml(); }
+  else if(mode === "manager"){ html = hdrHtml() + `<div class="wrap no-tab">${managerHtml(me.storeId)}</div>`; }
+  else if(mode === "owner"){
     const body = ui.ownerStore ? managerHtml(ui.ownerStore, true)
       : ui.ownerScreen === "settings" ? commonSettingsHtml()
       : ui.ownerScreen === "staff" ? staffSettingsHtml()
+      : ui.ownerScreen === "master" ? masterHtml()
       : ownerHtml();
     html = hdrHtml() + `<div class="wrap no-tab">${body}</div>`;
   }
   app.innerHTML = html;
   // 個人分はA4縦、月間シフト表はA4横（画面からCtrl+Pされた場合にも合わせる）。
   // スタッフでも「店舗全体」ビューは月間シフト表なのでA4横にする
-  const staffStoreView = !!view && view.role === "staff" && ui.staffTab === "shift" && ui.staffShiftView === "store";
-  setPageSize(view && view.role === "staff" && !staffStoreView ? "portrait" : "landscape");
+  const staffStoreView = mode === "staff" && ui.staffTab === "shift" && ui.staffShiftView === "store";
+  setPageSize(mode === "staff" && !staffStoreView ? "portrait" : "landscape");
 }
 
 function vpLabel(){
-  if(!view) return "";
-  if(view.role === "owner") return "オーナー";
-  if(view.role === "manager") return `店長｜${esc(storeOf(view.storeId).name)}`;
-  return `${esc(userOf(view.userId).name)}`;
+  const me = viewer();
+  if(!me) return "";
+  const mode = uiModeOf(me);
+  if(mode === "owner") return esc(roleOf(me).name);
+  if(mode === "manager") return `${esc(roleOf(me).name)}｜${esc(storeOf(me.storeId).name)}`;
+  return `${esc(me.name)}`;
 }
 
 function hdrHtml(){
@@ -962,26 +1055,29 @@ function hdrHtml(){
 
 /* ---------------- 視点選択 ---------------- */
 function viewSelectHtml(){
-  const mgrBtns = state.stores.map(st => {
-    const mg = members(st.id).find(u => u.role === "manager");
-    return `<button class="vs-item" onclick="A.setView('manager',${st.id})">
+  // 未入社(入社日が未来)の人も出す(来月の希望提出ができる必要があるため)。除くのは退職者だけ
+  // オーナー欄: 他店舗の閲覧まで持つ段のユーザー全員
+  const ownBtns = state.users.filter(u => !retired(u) && can(u, "otherStores")).map(u =>
+    `<button class="vs-item" onclick="A.setView(${u.id})"><span class="role-ic">👑</span>
+      <span>${esc(u.name)}<small>${esc(roleOf(u).name)}・全店舗の横断管理</small></span></button>`).join("");
+  // 店長欄: 有効店舗ごとに role==="manager" の在籍者を1人(いなければ「店長: -」)
+  const mgrBtns = activeStores().map(st => {
+    const mg = state.users.find(u => u.storeId === st.id && u.role === "manager" && !retired(u));
+    return `<button class="vs-item" onclick="${mg ? `A.setView(${mg.id})` : `A.noManager()`}">
       <span class="store-dot" style="background:${st.color}"></span>
       <span>${esc(st.name)}<small>店長: ${esc(mg ? mg.name : "-")}</small></span></button>`;
   }).join("");
-  const staffBtns = state.stores.map(st => {
-    const list = members(st.id).filter(u => u.role === "staff").map(u =>
-      `<button class="vs-item" onclick="A.setView('staff',${u.id})">
+  // スタッフ欄: 店長・オーナー級以外の在籍者(追加ロール=副店長等もここに出る)
+  const staffBtns = activeStores().map(st =>
+    state.users.filter(u => u.storeId === st.id && !retired(u) && !can(u, "otherStores") && u.role !== "manager")
+      .map(u => `<button class="vs-item" onclick="A.setView(${u.id})">
         <span class="store-dot" style="background:${st.color}"></span>
-        <span>${esc(u.name)}<small>${esc(st.name)}・${esc(u.type)}</small></span></button>`).join("");
-    return list;
-  }).join("");
+        <span>${esc(u.name)}<small>${esc(st.name)}・${esc(u.type)}${u.role !== "staff" ? "・" + esc(roleOf(u).name) : ""}</small></span></button>`).join("")
+  ).join("");
   return `<div class="wrap no-tab" style="max-width:560px;">
     <div class="vs-title">視点を選択</div>
     <div class="vs-sub">デモ用のため認証はありません。タップで各ロールの画面に入れます。</div>
-    <div class="vs-grid">
-      <button class="vs-item" onclick="A.setView('owner',0)"><span class="role-ic">👑</span>
-        <span>オーナー<small>${esc(userOf(1).name)}・全店舗の横断管理</small></span></button>
-    </div>
+    <div class="vs-grid">${ownBtns}</div>
     <div class="vs-group">店長（店舗を選択）</div>
     <div class="vs-grid">${mgrBtns}</div>
     <div class="vs-group">スタッフ（名前を選択）</div>
@@ -1038,9 +1134,16 @@ function staffShiftTab(me){
     const leaveChip = isLeave(reqAt(me.id, ds)) ? `<span class="chip leave">有給</span>` : "";
     const sh = shiftAt(me.id, ds);
     // 有給の日にシフトが入っていることもある(店長が後から入れた等)。
-    // 本人が気づけないと困るのでシフトを優先して出し、有給は併記する
+    // 本人が気づけないと困るのでシフトを優先して出し、有給は併記する。
+    // 在籍期間外(入社前・退職後)の日も、データが残っていれば店長グリッドと同じものを出す
+    // (本人にだけ見えないと「店舗全体タブでは見えるのに自分のシフトでは見えない」食い違いになる)。
+    // 何も無い日だけ「公休」ではなく在籍外の表記にする。
+    // 在籍外の判定は有給チップより先に行う(店長グリッドの分岐順と揃える。
+    // 先に有給を出すと、同じ日が店長グリッドでは「—」・本人カレンダーでは「有給」と食い違う)
     if(!sh || sh.status !== "published")
-      return leaveChip || (pubMonth ? `<span class="chip ghost">公休</span>` : "");
+      return !activeOn(me, ds)
+        ? `<span class="chip ghost na">—</span>`
+        : (leaveChip || (pubMonth ? `<span class="chip ghost">公休</span>` : ""));
     const p = sh.patternId ? patternOf(sh.patternId) : null;
     if(p && p.start === sh.start && p.end === sh.end)
       // pr-time: 印刷時のみ表示。白黒でもパターンを判別できるよう時刻を必ず併記する
@@ -1068,7 +1171,9 @@ function staffReqTab(me){
   const [y, m] = monthAt(1);
   const cell = ds => {
     const r = reqAt(me.id, ds);
-    if(!r) return "";
+    // 在籍期間外(入社前・退職後)の日。希望が残っていればそれを出し、
+    // 何も無い日だけ在籍外の表記にする(店長グリッド・自分のシフトと分岐順を揃える)
+    if(!r) return activeOn(me, ds) ? "" : `<span class="chip ghost na">—</span>`;
     // cal-rq: スマホ幅だとマスに収まらず省略されるので折り返し可にする。
     // 時間・パターン希望は途中で不自然に折れないよう2要素に分け、画面は2行・印刷は1行に戻す
     if(r.type === "day_off") return `<span class="chip ghost cal-rq">希望休</span>`;
@@ -1124,7 +1229,9 @@ function managerHtml(storeId, fromOwner, ro){
   const st = storeOf(storeId);
   const [y, m] = monthAt(ro ? ro.monthOffset : ui.mgrMonthOffset);
   const ym = ymKey(y, m);
-  const mem = members(storeId);
+  // その月に在籍していた人＋その月に実績(シフト・希望)がある人。
+  // これで「退職日以降は一覧・印刷から外れ、在籍していた過去月では従来どおり表示」が成立する
+  const mem = membersFor(storeId, y, m);
   const nDays = dim(y, m);
   const tds = todayStr();
 
@@ -1151,8 +1258,9 @@ function managerHtml(storeId, fromOwner, ro){
   const rows = mem.map(u => {
     const isMe = !!ro && u.id === ro.meId;
     // 扶養内のスタッフは、この月の見込みで上限を超えそうなら名前の下に警告を出す(表示のみ・自動生成の制約には入れていない)
-    // ※給与に関わる情報なので、読み取り専用ビュー(他のスタッフが見る)には出さない
-    const fw = (!ro && fuyouTarget(u) && fuyouOf(u, y, m).over) ? `<small class="fw">⚠扶養超過見込み</small>` : "";
+    // ※給与に関わる情報なので、読み取り専用ビュー(他のスタッフが見る)と、
+    //   時給・扶養の閲覧権限が無い段のロール(副店長など)には出さない
+    const fw = (!ro && vcan("wage") && fuyouTarget(u) && fuyouOf(u, y, m).over) ? `<small class="fw">⚠扶養超過見込み</small>` : "";
     let tds2 = ro
       ? `<td class="name-col"><b>${esc(u.name)}${isMe?`<span class="me-tag">あなた</span>`:""}</b><small>${esc(u.type)}</small></td>`
       : `<td class="name-col clk" onclick="A.openUser(${u.id})"><b>${esc(u.name)}</b><small>${esc(u.type)}${u.weeklyMaxDays?`・週${u.weeklyMaxDays}日まで`:""}</small>${fw}<small class="gear">⚙ 個人設定</small></td>`;
@@ -1177,6 +1285,12 @@ function managerHtml(storeId, fromOwner, ro){
         }
         // 希望と食い違う日の警告枠は店長向け。スタッフの閲覧ビューには出さない
         if(!ro && rq && (rq.type === "day_off" || rq.type === "paid_leave")) conflict = " conflict";
+        // 退職日を後から入れた等で在籍期間外にシフトが残っている日。店長が見つけて掃除できるようにする
+        if(!ro && !activeOn(u, ds)) conflict = " conflict";
+      }else if(!activeOn(u, ds)){
+        // 在籍期間外の日は「公休」と出さない(休みを与えているように見えるため)。
+        // 「割当のない日は必ず公休/有給で埋める」仕様の唯一の例外
+        inner = `<span class="off-chip na">—</span>`;
       }else if(rq && rq.type === "paid_leave"){
         inner = `<span class="off-chip leave">有給</span>`;
       }else if(made){
@@ -1243,12 +1357,14 @@ function managerHtml(storeId, fromOwner, ro){
       青い行があなたのシフトです。横にスクロールすると月末まで見られます。</p>` : ""}`;
   }
 
-  const overN = fuyouOverMembers(storeId, y, m).length;
+  // 扶養(給与情報)は閲覧権限のある段のロールにだけ出す
+  const overN = vcan("wage") ? fuyouOverMembers(storeId, y, m).length : 0;
   const backBtn = fromOwner ? `<button class="btn btn-sm" onclick="A.ownerBack()">‹ ダッシュボード</button>` : "";
-  const nextBtns = ui.mgrMonthOffset === 1
-    ? `<button class="btn" onclick="A.generate(${storeId})">✨ 自動生成</button>
-       <button class="btn btn-primary" onclick="A.publish(${storeId})">📢 シフトを公開</button>`
-    : "";
+  // 来月のみ操作可・無効化した店舗はシフトを作らない。公開は publish 権限のある段だけ
+  const canOp = ui.mgrMonthOffset === 1 && !st.archived;
+  const nextBtns =
+    (canOp ? `<button class="btn" onclick="A.generate(${storeId})">✨ 自動生成</button>\n       ` : "")
+    + ((canOp && vcan("publish")) ? `<button class="btn btn-primary" onclick="A.publish(${storeId})">📢 シフトを公開</button>` : "");
   const reqCount = state.requests.filter(r => r.storeId === storeId && ymOf(r.date) === ym).length;
 
   const printHead = `<div class="print-head">
@@ -1262,9 +1378,10 @@ function managerHtml(storeId, fromOwner, ro){
     ${backBtn}
     <span style="font-weight:700; font-size:15px;"><span class="store-dot" style="display:inline-block;background:${st.color}"></span> ${esc(st.name)}</span>
     <span class="st-chip ${st.mode==='pattern'?'st-none':'st-none'}">${st.mode === "pattern" ? "パターン制" : "自由時間制"}</span>
+    ${st.archived ? `<span class="st-chip st-none">無効化済み</span>` : ""}
     ${overN ? `<span class="fw-chip">⚠ 扶養超過見込み ${overN}名</span>` : ""}
     <span style="flex:1"></span>
-    <button class="btn btn-sm" onclick="A.mgrConditions(${storeId})">⚙ 条件設定</button>
+    ${st.archived ? "" : `<button class="btn btn-sm" onclick="A.mgrConditions(${storeId})">⚙ 条件設定</button>`}
   </div>
   <div class="mgr-toolbar">
     <div class="seg">
@@ -1345,14 +1462,15 @@ function timeSel(onchange, val){
 function ownerHtml(){
   const [ny, nm] = monthAt(1);
   const nYm = ymKey(ny, nm);
-  const cards = state.stores.map(st => {
+  const cards = activeStores().map(st => {
     const shs = state.shifts.filter(s => s.storeId === st.id && ymOf(s.date) === nYm);
     const hasDraft = shs.some(s => s.status === "draft");
     const hasPub = shs.some(s => s.status === "published");
     const status = hasPub && !hasDraft ? `<span class="st-chip st-pub">公開済み</span>`
       : hasDraft ? `<span class="st-chip st-draft">下書き</span>` : `<span class="st-chip st-none">未作成</span>`;
     const reqN = state.requests.filter(r => r.storeId === st.id && ymOf(r.date) === nYm).length;
-    const mg = members(st.id).find(u => u.role === "manager");
+    // 退職者は店長として出さない(視点選択の店長ボタンと表示が食い違うため。どちらも !retired で揃える)
+    const mg = membersFor(st.id, ny, nm).find(u => u.role === "manager" && !retired(u));
     const over = fuyouOverMembers(st.id, ny, nm);
     return `<div class="card own-card" onclick="A.ownerOpen(${st.id})">
       <span class="bar" style="background:${st.color}"></span>
@@ -1367,21 +1485,32 @@ function ownerHtml(){
       <span class="arrow">›</span>
     </div>`;
   }).join("");
+  // 無効化した店舗も過去実績の閲覧のためドリルインできる(本体の一覧からは外し、下に薄く並べる)
+  const arch = state.stores.filter(st => st.archived);
+  const archArea = arch.length ? `<div class="ms-grp">無効化した店舗</div>` + arch.map(st =>
+    `<div class="card own-card ms-off" onclick="A.ownerOpen(${st.id})">
+      <span class="bar" style="background:${st.color}"></span>
+      <div class="info"><div class="nm">${esc(st.name)} <span class="st-chip st-none">無効化済み</span></div>
+        <div class="meta">過去のシフト・希望は残っています（タップで閲覧できます）</div></div>
+      <span class="arrow">›</span>
+    </div>`).join("") : "";
   return `<div class="mgr-toolbar">
     <h2 class="sec" style="font-size:17px; margin:0;">全店舗ダッシュボード（${ny}年${nm+1}月）</h2>
     <span style="flex:1"></span>
-    <button class="btn btn-sm" onclick="A.openStaffSettings()">👤 個人設定</button>
-    <button class="btn btn-sm" onclick="A.openCommonSettings()">⚙ 共通設定</button>
-  </div>${cards}
+    ${vcan("master") ? `<button class="btn btn-sm" onclick="A.openMaster()">🏬 マスタ管理</button>` : ""}
+    ${vcan("wage") ? `<button class="btn btn-sm" onclick="A.openStaffSettings()">👤 個人設定</button>` : ""}
+    ${vcan("master") ? `<button class="btn btn-sm" onclick="A.openCommonSettings()">⚙ 共通設定</button>` : ""}
+  </div>${cards}${archArea}
   <p class="small muted">店舗カードをタップすると、その店舗のシフト表（店長画面と同等）を開きます。</p>
+  <p class="small muted">「マスタ管理」では店舗・スタッフの追加／編集／無効化と、ロール（権限の段）の管理ができます。</p>
   <p class="small muted">「共通設定」では雇用形態ごとの既定実働時間・休憩の自動ルール・全店共通のシフトパターン・扶養の上限額を設定できます。「個人設定」ではスタッフごとの時給・扶養区分などを設定できます。</p>`;
 }
 
 /* ---------------- 個人設定(スタッフ一覧) ---------------- */
 function staffSettingsHtml(){
   const [y, m] = monthAt(ui.mgrMonthOffset);
-  const cards = state.stores.map(st => {
-    const rows = members(st.id).map(u => {
+  const cards = activeStores().map(st => {
+    const rows = membersFor(st.id, y, m).map(u => {
       const f = fuyouTarget(u) ? fuyouOf(u, y, m) : null;
       const sub = fuyouTarget(u)
         ? `時給${u.wage.toLocaleString("ja-JP")}円・扶養内　累計＋見込み ${yenLabel(f.total)} / 上限 ${yenLabel(f.limit)}`
@@ -1404,6 +1533,97 @@ function staffSettingsHtml(){
   </div>
   <p class="small muted">スタッフをタップすると、雇用形態・週の最大勤務日数・出勤可能曜日・時給・年初〜先月の累計額・扶養区分を編集できます。</p>
   ${cards}`;
+}
+
+/* ---------------- マスタ管理(店舗・スタッフ・ロール) ----------------
+   クライアント自身が運用できるようにするための画面。
+   編集はモーダル単位で「保存する」→即 state 反映(共通設定のようなドラフト方式にはしない)。
+   動的な文字列(名前など)はJS引数に埋め込まず、必ずIDで受け渡す
+   ------------------------------------------------------------------- */
+function masterHtml(){
+  /* ----- ① 店舗 ----- */
+  // 無効化済みは末尾に薄表示で並べる(物理削除はしないため一覧からは消さない)
+  const stRows = state.stores.slice()
+    .sort((a,b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0))
+    .map(st => {
+      const n = state.users.filter(u => u.storeId === st.id && !retired(u)).length;
+      return `<div class="pat-row${st.archived ? " ms-off" : ""}">
+        <span class="pc" style="background:${st.color}"></span>
+        <div class="pi">
+          <b>${esc(st.name)}</b>${st.archived ? ` <span class="st-chip st-none">無効化済み</span>` : ""}
+          <small>${st.mode === "pattern" ? "パターン制" : "自由時間制"}・在籍スタッフ ${n}名</small>
+        </div>
+        <button class="btn btn-sm" onclick="A.openStoreEdit(${st.id})">編集</button>
+      </div>`;
+    }).join("");
+
+  /* ----- ② スタッフ ----- */
+  const uRow = u => `<div class="us-row${retired(u) ? " ms-off" : ""}" onclick="A.openStaffEdit(${u.id})">
+    <div class="ui2">
+      <b>${esc(u.name)}</b>${retired(u) ? ` <span class="st-chip st-none">退職済み ${esc(u.leaveDate)}</span>` : ""}
+      <small>${esc(roleOf(u).name)}・${esc(u.type)}</small>
+      ${(u.joinDate || u.leaveDate) ? `<small>${u.joinDate ? `入社 ${esc(u.joinDate)}` : ""}${(u.joinDate && u.leaveDate) ? "／" : ""}${u.leaveDate ? `退職 ${esc(u.leaveDate)}` : ""}</small>` : ""}
+    </div>
+    <span class="arrow">›</span></div>`;
+  const noStore = state.users.filter(u => !u.storeId);
+  const uGroups = (noStore.length ? `<div class="ms-grp">店舗に所属しない</div>${noStore.map(uRow).join("")}` : "")
+    + activeStores().map(st => {
+      const list = state.users.filter(u => u.storeId === st.id);
+      return `<div class="ms-grp"><span class="store-dot" style="display:inline-block;background:${st.color}"></span> ${esc(st.name)}</div>`
+        + (list.length ? list.map(uRow).join("") : `<p class="small muted">スタッフがいません。</p>`);
+    }).join("")
+    // 無効化した店舗に残っているスタッフも末尾に薄表示で出す。
+    // 出さないと一覧から消えてしまい、復職・別店舗への異動ができない片道になる
+    + state.stores.filter(s => s.archived).map(st => {
+      const list = state.users.filter(u => u.storeId === st.id);
+      if(!list.length) return "";
+      return `<div class="ms-grp ms-off"><span class="store-dot" style="display:inline-block;background:${st.color}"></span> ${esc(st.name)}（無効化済み）</div>`
+        + list.map(uRow).join("");
+    }).join("");
+
+  /* ----- ③ ロール(段) ----- */
+  let lvRows = "";
+  for(let lv = MAX_LEVEL; lv >= 1; lv--){
+    const rs = state.roles.filter(r => r.level === lv);
+    const items = rs.length ? rs.map(r => {
+      const n = state.users.filter(u => u.role === r.id).length;
+      // 既定ロールのidは文字列・追加ロールは数値。onclick属性は " で囲むのでJS側は ' で括る
+      const rid = typeof r.id === "number" ? String(r.id) : `'${r.id}'`;
+      return `<div class="pat-row">
+        <div class="pi"><b>${esc(r.name)}</b><small>${n}名に設定${isFixedRole(r.id) ? "・既定のロール" : ""}</small></div>
+        <button class="btn btn-sm" onclick="A.openRoleEdit(${rid})">編集</button>
+        ${isFixedRole(r.id) ? "" : `<button class="btn btn-sm btn-danger" onclick="A.delRole(${rid})">✕</button>`}
+      </div>`;
+    }).join("") : `<p class="small muted" style="margin:0;">このロールはまだありません（ここに段を挿せます）。</p>`;
+    lvRows += `<div class="ms-lv">
+      <div class="lv-h">Lv${lv}</div>
+      <div class="lv-c">${LEVEL_CAPS[lv]}</div>
+      ${items}
+    </div>`;
+  }
+
+  return `<div class="mgr-toolbar">
+    <button class="btn btn-sm" onclick="A.ownerBack()">‹ ダッシュボード</button>
+    <span style="font-weight:700;">マスタ管理</span>
+  </div>
+  <div class="card">
+    <h2 class="sec">店舗</h2>
+    <p class="small muted" style="margin:0 0 8px;">店舗は削除ではなく<b>無効化</b>します（過去のシフト・希望・設定は残り、あとから再開できます）。方式（パターン制／自由時間制）は追加時のみ指定できます。</p>
+    ${stRows}
+    <div style="margin-top:10px;"><button class="btn btn-sm" onclick="A.openStoreEdit(null)">＋ 店舗を追加</button></div>
+  </div>
+  <div class="card">
+    <h2 class="sec">スタッフ</h2>
+    <p class="small muted" style="margin:0 0 8px;">ここでは<b>氏名・所属店舗・ロール・入社日・退職日</b>を管理します（時給・勤務条件は「個人設定」）。退職したスタッフは<b>削除せず退職日</b>を入れます（過去のシフト実績は残ります）。</p>
+    ${uGroups}
+    <div style="margin-top:10px;"><button class="btn btn-sm" onclick="A.openStaffEdit(null)">＋ スタッフを追加</button></div>
+  </div>
+  <div class="card">
+    <h2 class="sec">ロール（権限の段）</h2>
+    <p class="small muted" style="margin:0 0 8px;"><b>上の段は下の段の権限をすべて含みます</b>。「副店長（店長とスタッフの間）」のように<b>段を挿す</b>形でロールを追加できます（入力は名前と段の2つだけ）。既定の3ロールは名前だけ変更できます。</p>
+    ${lvRows}
+    <div><button class="btn btn-sm" onclick="A.openRoleEdit(null)">＋ ロールを追加</button></div>
+  </div>`;
 }
 
 /* ---------------- 共通設定(オーナーのみ・全店舗に効く) ---------------- */
@@ -1536,16 +1756,16 @@ const A = {
   closeModal,
 
   /* ----- 視点 ----- */
-  setView(role, id){
-    if(role === "owner") view = { role:"owner" };
-    else if(role === "manager") view = { role:"manager", storeId:id };
-    else view = { role:"staff", userId:id };
+  // view は「誰の視点か」だけ。どの画面になるかはその人のロールの段で決まる
+  setView(userId){
+    view = { userId };
     ui.staffTab = "shift"; ui.staffCalOffset = 0; ui.staffShiftView = "mine";
     ui.mgrMonthOffset = 1; ui.mgrScreen = "grid"; ui.ownerStore = null;
     ui.ownerScreen = "dash"; ui.setDraft = null; ui.condDraft = null;
     saveView(); render();
   },
   gotoSelect(){ view = null; saveView(); render(); },
+  noManager(){ toast("この店舗の店長は未設定です（マスタ管理で設定できます）"); },
 
   /* ----- スタッフ ----- */
   staffTab(t){ ui.staffTab = t; render(); },
@@ -1574,6 +1794,8 @@ const A = {
   /* ----- 希望提出 ----- */
   openReq(ds){
     const me = userOf(view.userId);
+    // 在籍期間外(入社前・退職後)の日には希望を出せない
+    if(!activeOn(me, ds)){ toast("在籍期間外の日には希望を出せません（入社前または退職後の日です）"); return; }
     const st = storeOf(me.storeId);
     const cur = reqAt(me.id, ds);
     const curArea = cur ? `<p class="small" style="background:var(--accent-soft); border-radius:8px; padding:8px 10px;">
@@ -1609,6 +1831,7 @@ const A = {
   },
   _putReq(ds, data){
     const me = userOf(view.userId);
+    if(!activeOn(me, ds)){ toast("在籍期間外の日には希望を出せません（入社前または退職後の日です）"); return; }
     // 希望休は月MAX_DAY_OFF日まで(有給は別枠でカウントしない)。
     // 同じ日の出し直しは差し替えなので、その日ぶんは残数から除いて数える
     if(data.type === "day_off"){
@@ -1689,12 +1912,23 @@ const A = {
     }
     if(rq) info.push(`スタッフの希望: <b>${reqLabel(rq)}</b>`);
     // 扶養内のスタッフは、その月の見込み額と残額を店長がその場で確認できるようにする
-    if(fuyouTarget(u)){
+    // (給与情報なので、時給・扶養の閲覧権限がある段のロールにだけ出す)
+    if(vcan("wage") && fuyouTarget(u)){
       const f = fuyouOf(u, parseD(ds).getFullYear(), parseD(ds).getMonth());
       info.push(`扶養: 累計 ${yenLabel(f.acc)} ＋ 当月見込み ${yenLabel(f.est)} ＝ <b>${yenLabel(f.total)}</b>／上限 ${yenLabel(f.limit)}　`
         + (f.over ? `<b style="color:var(--danger)">${yenLabel(-f.rest)} 超過見込み</b>` : `残り ${yenLabel(f.rest)}`));
     }
     const infoArea = info.length ? `<p class="small" style="background:#f7f8fb; border-radius:8px; padding:8px 10px;">${info.join("<br>")}</p>` : "";
+
+    // 在籍期間外(入社前・退職後)の日は割当てられない。
+    // ただし矛盾データ(退職日を後から入れた等)を掃除できるよう、シフトが残っている日は削除だけ許す
+    if(!activeOn(u, ds)){
+      if(!sh){ toast(`${u.name}さんは${jdate(ds)}に在籍していません（入社前または退職後）`); return; }
+      openModal(`${mdlHead(esc(u.name) + "｜" + jdate(ds))}${infoArea}
+        <p class="small" style="color:var(--danger);">この日は<b>在籍期間外</b>です（入社前または退職後）。シフトの削除のみできます。</p>
+        <button class="btn btn-lg btn-danger" onclick="A.delCell(${storeId},${userId},'${ds}')">シフトを削除（公休にする）</button>`);
+      return;
+    }
 
     let body = "";
     // 自由時間制の店舗でもパターンを使える(あてはめてから下の時刻指定で微調整できる)
@@ -1734,6 +1968,11 @@ const A = {
     this._saveShift(storeId, userId, ds, s, e, sh ? sh.patternId : null);
   },
   _saveShift(storeId, userId, ds, start, end, patternId){
+    // 防御: 在籍期間外の日には割当てない(openCell 側でも塞いでいる)
+    const u0 = userOf(userId);
+    if(u0 && !activeOn(u0, ds)){
+      toast(`${u0.name}さんは${jdate(ds)}に在籍していません（入社前または退職後）`); return;
+    }
     let sh = shiftAt(userId, ds);
     const existed = !!sh;
     if(sh){ sh.start = start; sh.end = end; sh.patternId = patternId; }
@@ -1811,7 +2050,10 @@ const A = {
     state.publishedMonths[storeId + ":" + ym] = true;
     state.createdMonths[storeId + ":" + ym] = true;
     const st = storeOf(storeId);
-    const mem = members(storeId);
+    // 公開した月の在籍メンバーだけに通知する。
+    // 退職者は membersFor には残る(実績シフトがあれば紙面・グリッドには出す)が、
+    // 辞めた人に元の職場の公開通知が届くのは不自然なので通知先からは外す
+    const mem = membersFor(storeId, y, m).filter(u => !retired(u));
     mem.forEach(u => notify(u.id, "シフト公開のお知らせ", `${st.name}の${m+1}月シフトが公開されました。アプリで確認してください。`));
     saveState(); render();
     toast(`${m+1}月のシフトを公開し、スタッフ${mem.length}名に通知しました`);
@@ -1852,9 +2094,13 @@ const A = {
     const dowChks = DOWK.map((k, i) =>
       `<label class="chk"><input type="checkbox" id="us-dow-${k}" ${(!u.availableDays || u.availableDays.includes(k)) ? "checked" : ""}>${DOWJ[i]}</label>`).join("");
     const dep = isDependent(u);
+    // 時給・扶養は閲覧権限のある段のロールにだけ出す(Lv1〜Lv3のロールには一切出さない)
+    const wageOk = vcan("wage");
     // 計算結果(扶養外・時給未設定なら計算対象外と明示する)
     let box;
-    if(fuyouTarget(u)){
+    if(!wageOk){
+      box = "";
+    }else if(fuyouTarget(u)){
       const f = fuyouOf(u, y, m);
       const [cy2, cm2] = monthAt(0);
       // 表示月が来月なら、累計には今月ぶんの「見込み」が含まれる。そこを隠さず書く
@@ -1877,7 +2123,7 @@ const A = {
         <span class="small muted">空欄＝制限なし</span></div>
       <div class="frow"><label>出勤可能曜日</label></div>
       <div class="chk-grid" style="margin-bottom:10px;">${dowChks}</div>
-      <div class="frow"><label>時給</label>
+      ${wageOk ? `<div class="frow"><label>時給</label>
         <input type="number" id="us-wage" min="0" max="100000" step="10" style="width:100px;" value="${u.wage ?? ""}" placeholder="空=なし"> 円</div>
       <div class="frow"><label>年初〜先月の累計額</label>
         <input type="number" id="us-ytd" min="0" max="99999999" step="1000" style="width:130px;" value="${u.ytdYen ?? 0}"> 円</div>
@@ -1885,7 +2131,8 @@ const A = {
         <select class="tsel" id="us-dep">
           <option value="in" ${dep?"selected":""}>扶養内（計算・警告の対象）</option>
           <option value="out" ${dep?"":"selected"}>扶養外（対象外）</option>
-        </select></div>
+        </select></div>`
+      : `<p class="small muted">時給・扶養の項目は、閲覧権限のあるロールのみ表示されます。</p>`}
       <p class="small muted" style="margin:0 0 10px;">休憩は個人ごとには設定しません（パターンの設定 → 無ければ休憩の自動ルール、の2段階で決まります）。</p>
       <button class="btn btn-lg btn-primary" onclick="A.saveUser(${userId})">保存する</button>`);
   },
@@ -1893,30 +2140,328 @@ const A = {
     const u = userOf(userId); if(!u) return;
     const type = document.getElementById("us-type").value;
     const wk   = document.getElementById("us-week").value.trim();
-    const wage = document.getElementById("us-wage").value.trim();
-    const ytd  = document.getElementById("us-ytd").value.trim();
-    const dep  = document.getElementById("us-dep").value === "in";
+    // 時給・扶養は権限が無いと画面に出ていない。その場合は既存値を一切変更しない
+    const elWage = document.getElementById("us-wage");
+    const elYtd  = document.getElementById("us-ytd");
+    const elDep  = document.getElementById("us-dep");
+    const wage = elWage ? elWage.value.trim() : null;
+    const ytd  = elYtd ? elYtd.value.trim() : null;
+    const dep  = elDep ? elDep.value === "in" : null;
     const days = DOWK.filter(k => { const el = document.getElementById("us-dow-" + k); return el && el.checked; });
     if(wk !== ""){
       const n = Number(wk);
       if(!isFinite(n) || n < 1 || n > 7){ toast("週の最大勤務日数は1〜7日で入力してください"); return; }
     }
     if(!days.length){ toast("出勤可能曜日を1つ以上選んでください"); return; }
-    if(wage !== ""){
+    if(wage != null && wage !== ""){
       const n = Number(wage);
       if(!isFinite(n) || n < 0 || n > 100000){ toast("時給は0〜100,000円で入力してください"); return; }
     }
-    const yn = ytd === "" ? 0 : Number(ytd);
-    if(!isFinite(yn) || yn < 0 || yn > 99999999){ toast("累計額は0〜99,999,999円で入力してください"); return; }
+    let yn = null;
+    if(ytd != null){
+      yn = ytd === "" ? 0 : Number(ytd);
+      if(!isFinite(yn) || yn < 0 || yn > 99999999){ toast("累計額は0〜99,999,999円で入力してください"); return; }
+    }
 
     u.type = type;
     u.weeklyMaxDays = wk === "" ? null : Number(wk);
     u.availableDays = days.length === 7 ? null : days;   // 全曜日可なら制限なしとして持つ
-    u.wage = wage === "" ? null : Number(wage);
-    u.ytdYen = yn;
-    u.dependent = dep;
+    if(wage != null) u.wage = wage === "" ? null : Number(wage);
+    if(yn != null) u.ytdYen = yn;
+    if(dep != null) u.dependent = dep;
     saveState(); closeModal(); render();
     toast(`${u.name}さんの個人設定を保存しました`);
+  },
+
+  /* ===== マスタ管理(店舗・スタッフ・ロール) =====
+     モーダルごとに「保存する」で即 state 反映する(共通設定のドラフト方式にはしない)。
+     select の値は必ず文字列で返るため、保存時に数値へ変換すること
+     (storeId・追加ロールのidは数値。文字列のまま保存すると === 比較が全て外れる) */
+  openMaster(){ ui.ownerScreen = "master"; ui.setDraft = null; render(); },
+
+  /* ----- ① 店舗 ----- */
+  openStoreEdit(id){
+    const st = id != null ? storeOf(id) : null;
+    const cur = st || { name:"", mode:"pattern", color:"#3B6EF5", patternIds:[] };
+    const patChks = state.patterns.map(p => `<label class="chk">
+      <input type="checkbox" id="ms-st-pat-${p.id}" ${(cur.patternIds||[]).includes(p.id) ? "checked" : ""}>
+      <span class="store-dot" style="background:${p.color}"></span>${esc(p.name)} ${p.start}〜${p.end}</label>`).join("");
+    // 方式は追加時のみ指定できる(conditionsの形・既存シフトとの整合が壊れるため変更不可)
+    const modeArea = st
+      ? `<div class="frow"><label>方式</label><span class="small">${st.mode === "pattern" ? "パターン制" : "自由時間制"}<span class="muted">（追加後は変更できません）</span></span></div>`
+      : `<div class="frow"><label>方式</label>
+          <select class="tsel" id="ms-st-mode">
+            <option value="pattern">パターン制</option>
+            <option value="free">自由時間制</option>
+          </select></div>`;
+    const archArea = !st ? ""
+      : st.archived
+        ? `<button class="btn btn-lg" style="margin-top:10px;" onclick="A.unarchiveStore(${st.id})">↩ この店舗を再開する</button>`
+        : `<button class="btn btn-lg btn-danger" style="margin-top:10px;" onclick="A.askArchiveStore(${st.id})">⛔ この店舗を無効化する</button>`;
+    openModal(`${mdlHead(st ? "店舗を編集" : "店舗を追加")}
+      <div class="frow"><label>名前</label>
+        <input type="text" id="ms-st-name" value="${esc(cur.name)}" placeholder="例: 駅前店" maxlength="20"></div>
+      ${modeArea}
+      <div class="frow"><label>色</label><input type="color" id="ms-st-color" value="${cur.color}"></div>
+      <div class="frow"><label>使用パターン</label></div>
+      <div class="chk-grid" style="margin-bottom:10px;">${patChks || `<span class="small muted">パターンがありません（共通設定で登録できます）</span>`}</div>
+      <p class="small muted" style="margin:0 0 10px;">パターン制の店舗は使用パターンを1つ以上選んでください（自由時間制は手動あてはめ用のため0個でも構いません）。</p>
+      <button class="btn btn-lg btn-primary" onclick="A.saveStore(${st ? st.id : "null"})">保存する</button>
+      ${archArea}`);
+  },
+  saveStore(id){
+    const name = document.getElementById("ms-st-name").value.trim();
+    if(!name){ toast("店舗名を入力してください"); return; }
+    // 無効化済みの店舗とも重複させない(編集時は自分自身を除く)
+    if(state.stores.some(s => s.name === name && s.id !== id)){ toast("同じ名前の店舗があります"); return; }
+    const st = id != null ? storeOf(id) : null;
+    const mode = st ? st.mode : document.getElementById("ms-st-mode").value;
+    const color = document.getElementById("ms-st-color").value;
+    const patternIds = state.patterns
+      .filter(p => { const el = document.getElementById("ms-st-pat-" + p.id); return el && el.checked; })
+      .map(p => p.id);
+    if(mode === "pattern" && !patternIds.length){
+      toast("パターン制の店舗は使用パターンを1つ以上選んでください"); return;
+    }
+    if(st){
+      st.name = name; st.color = color; st.patternIds = patternIds;
+    }else{
+      const sid = state.seq++;
+      state.stores.push({ id: sid, name, mode, color, patternIds });
+      // 条件が無いと自動生成・不足判定が空条件で動いてしまうので必ず初期化する
+      state.conditions[sid] = (mode === "pattern")
+        ? { monthlyDaysOff: 8, maxConsecutive: 5, weekdayHeadcount: 2, weekendHeadcount: 3, patternRatio: {} }
+        : { monthlyDaysOff: 8, maxConsecutive: 5, weekdayHeadcount: 2, weekendHeadcount: 3, hourlyHeadcount: [] };
+    }
+    saveState(); closeModal(); render();
+    toast(st ? `${name}を保存しました` : `${name}を追加しました`);
+  },
+  askArchiveStore(id){
+    const st = storeOf(id); if(!st) return;
+    const n = state.users.filter(u => u.storeId === id && !retired(u)).length;
+    if(n){ toast(`在籍中のスタッフが${n}名います。先に退職日の設定または所属変更をしてください`); return; }
+    openModal(`${mdlHead("店舗を無効化")}
+      <p class="small">${esc(st.name)}を無効化します。過去のシフト・希望・設定は削除されません。
+      ダッシュボードから外れ、シフト作成の対象外になります。あとから「再開する」で戻せます。</p>
+      <div class="opt-grid">
+        <button class="btn btn-lg btn-danger" onclick="A.archiveStore(${id})">無効化する</button>
+        <button class="btn btn-lg" onclick="A.closeModal()">キャンセル</button>
+      </div>`);
+  },
+  archiveStore(id){
+    const st = storeOf(id); if(!st) return;
+    const n = state.users.filter(u => u.storeId === id && !retired(u)).length;
+    if(n){ toast(`在籍中のスタッフが${n}名います。先に退職日の設定または所属変更をしてください`); return; }
+    st.archived = true;                       // データは一切消さない(フラグだけ)
+    saveState(); closeModal(); render(); toast(`${st.name}を無効化しました`);
+  },
+  unarchiveStore(id){
+    const st = storeOf(id); if(!st) return;
+    delete st.archived;
+    saveState(); closeModal(); render(); toast(`${st.name}を再開しました`);
+  },
+
+  /* ----- ② スタッフ ----- */
+  openStaffEdit(id){
+    const u = id != null ? userOf(id) : null;
+    if(!u && !activeStores().length){ toast("先に店舗を追加してください"); return; }
+    const types = Object.keys((state.settings && state.settings.employmentDefaults) || {});
+    const defType = types.includes("社員") ? "社員" : (types[0] || "社員");
+    // 所属店舗は有効店舗のみ。ただし編集時は必ず「（所属なし）」も出す。
+    // 出さないと、いま所属なしの人(オーナー級)を編集した瞬間に select の既定値=先頭の有効店舗が
+    // 保存されて無言で所属替えになるし、一度店舗を付けた人を所属なしに戻せなくなる。
+    // 所属なしにしてよいかの判断はガード5(降格禁止)に任せる
+    const arcSt = u && u.storeId != null ? state.stores.find(s => s.id === u.storeId && s.archived) : null;
+    const storeOpts = (u ? `<option value="" ${!u.storeId ? "selected" : ""}>（所属なし）</option>` : "")
+      + activeStores().map(s =>
+        `<option value="${s.id}" ${u && u.storeId === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")
+      // 無効化した店舗に残っている人は、現在の所属を選択肢に出さないと開いた時点で別の値に化ける
+      + (arcSt ? `<option value="${arcSt.id}" selected>${esc(arcSt.name)}（無効化済み）</option>` : "");
+    const roleOpts = state.roles.slice().sort((a,b) => b.level - a.level).map(r => {
+      const sel = u ? (u.role === r.id) : (r.id === "staff");
+      return `<option value="${esc(String(r.id))}" ${sel ? "selected" : ""}>${esc(r.name)}（Lv${r.level}）</option>`;
+    }).join("");
+    // 雇用形態は追加時のみ(編集は個人設定側の担当)。台帳系とのすみ分けを固定する
+    const typeArea = u ? "" : `<div class="frow"><label>雇用形態</label>
+      <select class="tsel" id="ms-u-type">${types.map(t =>
+        `<option value="${esc(t)}" ${t === defType ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>`;
+    openModal(`${mdlHead(u ? "スタッフを編集" : "スタッフを追加")}
+      <div class="frow"><label>氏名</label>
+        <input type="text" id="ms-u-name" value="${u ? esc(u.name) : ""}" placeholder="例: 山田 太郎" maxlength="20"></div>
+      <div class="frow"><label>所属店舗</label><select class="tsel" id="ms-u-store">${storeOpts}</select></div>
+      <div class="frow"><label>ロール</label><select class="tsel" id="ms-u-role">${roleOpts}</select></div>
+      ${typeArea}
+      <div class="frow"><label>入社日（稼働開始日）</label>
+        <input type="date" id="ms-u-join" value="${u && u.joinDate ? u.joinDate : ""}"></div>
+      <div class="frow"><label>退職日（最終在籍日）</label>
+        <input type="date" id="ms-u-leave" value="${u && u.leaveDate ? u.leaveDate : ""}"></div>
+      <p class="small muted" style="margin:0 0 10px;">入社日・退職日は<b>任意</b>です（空欄＝制限なし）。<b>退職日はその日まで勤務できます</b>。期間外の日は割当・希望提出ができません。<br>時給・勤務条件（週の上限・出勤可能曜日）は「個人設定」で編集します。</p>
+      <button class="btn btn-lg btn-primary" onclick="A.saveStaff(${u ? u.id : "null"})">保存する</button>`);
+  },
+  saveStaff(id){
+    const u = id != null ? userOf(id) : null;
+    const name = document.getElementById("ms-u-name").value.trim();
+    if(!name){ toast("氏名を入力してください"); return; }
+    // select の値は文字列。storeId は数値で持つ(全域の === 比較が外れるため必ず変換する)
+    const sv = document.getElementById("ms-u-store").value;
+    const storeId = sv === "" ? undefined : Number(sv);
+    // ロールのidは既定3ロール=文字列 / 追加ロール=数値。一致するidが無ければ数値として扱う
+    const rv = document.getElementById("ms-u-role").value;
+    const role = state.roles.some(r => r.id === rv) ? rv : Number(rv);
+    const rObj = state.roles.find(r => r.id === role);
+    if(!rObj){ toast("ロールを選んでください"); return; }
+    const join  = document.getElementById("ms-u-join").value;
+    const leave = document.getElementById("ms-u-leave").value;
+    const elType = document.getElementById("ms-u-type");
+    const type = elType ? elType.value : (u ? u.type : "社員");
+
+    // 1. 退職日は入社日以降
+    if(join && leave && leave < join){ toast("退職日は入社日以降にしてください"); return; }
+    const willRetired = !!leave && leave < todayStr();
+    // 2. 店長は1店舗1人(保存後の状態で判定する。所属店舗の変更だけでも重複が作れるため)
+    //    保存対象者自身が退職者になる場合は判定しない。全参照が !retired で絞られていて実害が無く、
+    //    ここで止めると「退職した元店長の氏名・退職日を直せない」行き止まりができる
+    if(role === "manager" && storeId != null && !willRetired){
+      const dup = state.users.find(x => x.id !== id && x.storeId === storeId && x.role === "manager" && !retired(x));
+      if(dup){
+        const st = storeOf(storeId);
+        toast(`${st ? st.name : "この店舗"}の店長はすでに${dup.name}さんです（店長は1店舗1人）`); return;
+      }
+    }
+    // 3. ロックアウト防止(マスタ管理ができる在籍ユーザーを0人にしない)
+    const others = state.users.filter(x => x.id !== id && !retired(x) && can(x, "master")).length;
+    const willMaster = rObj.level >= PERM_LEVELS.master && !willRetired;
+    if(others + (willMaster ? 1 : 0) === 0){
+      toast("マスタ管理ができる在籍ユーザーがいなくなるため、この変更はできません"); return;
+    }
+    // 5. 店舗に所属しないユーザーは、他店舗の閲覧を失う段のロールにできない
+    //    (manager/staff の画面は所属店舗が前提のため、降格すると画面が開けなくなる)
+    if(storeId == null && rObj.level < PERM_LEVELS.otherStores){
+      toast("店舗に所属していないユーザーはこのロールにできません（先に所属店舗を設定してください）"); return;
+    }
+    // 6. 無効化した店舗に所属したまま在籍者に戻す保存は止める
+    //    (視点選択もオーナーの個人設定一覧も activeStores() を走査するため、
+    //     無効化店舗の在籍者はどちらにも出てこない=在籍者なのに存在しないように見える)
+    const arcSt = (storeId != null && !willRetired)
+      ? state.stores.find(s => s.id === storeId && s.archived) : null;
+    if(arcSt){
+      // どの店舗が無効化されているか名指しする(スタッフ一覧は複数店舗を同時に出すため)
+      toast(`${arcSt.name}は無効化されています。先に所属店舗を変更してください`); return;
+    }
+    // 4. 在籍期間外のデータの後始末。入社日側・退職日側で対称に扱い、シフトと希望で扱いを分ける
+    //    - 希望(requests): 「これから休みたい」という予定なので在籍期間外には意味を持たない。
+    //      ここで削除する。残すとグリッドに全セル「—」の行が出続け、公開通知も飛ぶうえ、
+    //      在籍期間外の日は希望モーダルが開かないので画面から消す手段が無い。
+    //      ただし削除するのは「今日以降」の希望だけ。過去の希望まで消すと公開済みの有給が黙って消え、
+    //      扶養の累計(monthEarnOf の有給分)も無通知で変わるため
+    //    - シフト(shifts): 実績なので消さない。警告＋赤枠＋セルの削除専用モーダルで店長が判断して掃除する
+    //    残シフトの警告は「今日以降」で絞らない(グリッドが赤枠を付ける範囲=在籍期間外の全日と件数を合わせる)
+    let jrN = 0, lrN = 0, jshN = 0, shN = 0;
+    if(id != null){
+      const tds = todayStr();
+      // 在籍期間外の希望を消して件数を返す(hit の範囲だけを消す)
+      const purge = hit => {
+        const n = state.requests.filter(hit).length;
+        if(n) state.requests = state.requests.filter(r => !hit(r));
+        return n;
+      };
+      if(join){
+        jrN  = purge(r => r.userId === id && r.date >= tds && r.date < join);
+        jshN = state.shifts.filter(s => s.userId === id && s.date < join).length;
+      }
+      if(leave){
+        lrN = purge(r => r.userId === id && r.date > leave && r.date >= tds);
+        shN = state.shifts.filter(s => s.userId === id && s.date > leave).length;
+      }
+    }
+    // 文言は「入社日側の希望削除 → 退職日側の希望削除 → 残シフト」の順で「。」連結(末尾に「。」は付けない)。
+    // 残シフトは必ず末尾の1文にまとめる(2文に分けると「シフト表から削除・整理してください」が2回出る)
+    const parts = [];
+    if(jrN) parts.push(`入社日より前の希望${jrN}件を削除しました`);
+    if(lrN) parts.push(`退職日より後の希望${lrN}件を削除しました`);
+    if(jshN && shN)
+      parts.push(`入社日より前にシフト${jshN}件・退職日より後にシフト${shN}件が残っています。シフト表から削除・整理してください`);
+    else if(jshN)
+      parts.push(`入社日より前にシフト${jshN}件が残っています。シフト表から削除・整理してください`);
+    else if(shN)
+      // 直前が「退職日より後の希望◯件を削除しました」のときだけ主語が自明なので前置きを省く
+      parts.push(lrN ? `シフト${shN}件が残っています。シフト表から削除・整理してください`
+                     : `退職日より後にシフト${shN}件が残っています。シフト表から削除・整理してください`);
+    const warn = parts.join("。");
+
+    if(u){
+      u.name = name; u.role = role;
+      if(storeId == null) delete u.storeId; else u.storeId = storeId;
+      if(join) u.joinDate = join; else delete u.joinDate;
+      if(leave) u.leaveDate = leave; else delete u.leaveDate;
+    }else{
+      // wage は持たせない(=扶養計算の対象外)・dependent 未設定(既定ルールに従う)・
+      // weeklyMaxDays / availableDays も持たせない(制限なし)。以降は個人設定で編集する
+      const nu = { id: state.seq++, name, role, storeId, type, ytdYen: 0 };
+      if(join) nu.joinDate = join;
+      if(leave) nu.leaveDate = leave;
+      state.users.push(nu);
+    }
+    saveState(); closeModal(); render();
+    toast(warn || (u ? `${name}さんを保存しました` : `${name}さんを追加しました`));
+  },
+
+  /* ----- ③ ロール(段) ----- */
+  openRoleEdit(id){
+    const r = id != null ? state.roles.find(x => x.id === id) : null;
+    const fixed = !!r && isFixedRole(r.id);
+    const lv = r ? r.level : 2;
+    let lvOpts = "";
+    for(let i = MAX_LEVEL; i >= 1; i--)
+      lvOpts += `<option value="${i}" ${i === lv ? "selected" : ""}>Lv${i}　${LEVEL_CAPS[i]}</option>`;
+    const rid = r ? (typeof r.id === "number" ? String(r.id) : `'${r.id}'`) : "null";
+    openModal(`${mdlHead(r ? "ロールを編集" : "ロールを追加")}
+      <div class="frow"><label>名前</label>
+        <input type="text" id="ms-r-name" value="${r ? esc(r.name) : ""}" placeholder="例: 副店長" maxlength="12"></div>
+      <div class="frow"><label>段（権限の高さ）</label>
+        <select class="tsel" id="ms-r-level" ${fixed ? "disabled" : ""}>${lvOpts}</select></div>
+      ${fixed ? `<p class="small muted" style="margin:0 0 10px;">既定のロールは<b>名前だけ</b>変更できます（段の変更・削除はできません）。</p>`
+        : `<p class="small muted" style="margin:0 0 10px;">上の段は下の段の権限をすべて含みます。</p>`}
+      <button class="btn btn-lg btn-primary" onclick="A.saveRole(${rid})">保存する</button>`);
+  },
+  saveRole(id){
+    const r = id != null ? state.roles.find(x => x.id === id) : null;
+    const name = document.getElementById("ms-r-name").value.trim();
+    if(!name){ toast("ロール名を入力してください"); return; }
+    if(state.roles.some(x => x.name === name && x.id !== id)){ toast("同じ名前のロールがあります"); return; }
+    const fixed = !!r && isFixedRole(r.id);
+    const el = document.getElementById("ms-r-level");
+    const level = (r && fixed) ? r.level : Math.min(MAX_LEVEL, Math.max(1, Number(el.value)));
+    // 段を下げるとマスタ管理ができる人がいなくなることがある
+    if(r && level !== r.level){
+      const cnt = state.users.filter(u => {
+        if(retired(u)) return false;
+        const ur = roleOf(u);
+        const l = ur.id === r.id ? level : ur.level;
+        return l >= PERM_LEVELS.master;
+      }).length;
+      if(!cnt){ toast("マスタ管理ができる在籍ユーザーがいなくなるため、この変更はできません"); return; }
+      // ガード5(店舗未所属ユーザーの降格禁止)は段の変更経由でも成立させる。
+      // 店舗に所属しない人が他店舗の閲覧を失うと manager/staff 画面が開けず storeOf(undefined) で落ちる
+      if(level < PERM_LEVELS.otherStores){
+        const nos = state.users.find(u => u.role === r.id && u.storeId == null);
+        if(nos){
+          toast(`このロールには店舗に所属していないユーザー（${nos.name}さん）がいるため、この段には変更できません（先に所属店舗を設定してください）`); return;
+        }
+      }
+    }
+    if(r){ r.name = name; r.level = level; }
+    else state.roles.push({ id: state.seq++, name, level });
+    saveState(); closeModal(); render();
+    toast(r ? `${name}を保存しました` : `${name}を追加しました`);
+  },
+  delRole(id){
+    const r = state.roles.find(x => x.id === id); if(!r) return;
+    if(isFixedRole(r.id)) return;
+    const n = state.users.filter(u => u.role === r.id).length;   // 退職者も含めて数える
+    if(n){ toast(`このロールは${n}名に設定されているため削除できません`); return; }
+    state.roles = state.roles.filter(x => x.id !== id);
+    saveState(); render(); toast(`${r.name}を削除しました`);
   },
 
   /* ----- 共通設定(全店舗) ----- */
@@ -1928,7 +2473,8 @@ const A = {
       breakTiers: JSON.parse(JSON.stringify(breakTiersIn(state))),
       fuyouLimit: fuyouLimit(),
       patterns: JSON.parse(JSON.stringify(state.patterns)),
-      stores: state.stores.map(s => ({ id:s.id, name:s.name, mode:s.mode, color:s.color, patternIds:(s.patternIds||[]).slice() }))
+      // 無効化した店舗は編集対象に出さない(パターン0のガードも有効店舗だけが対象になる)
+      stores: activeStores().map(s => ({ id:s.id, name:s.name, mode:s.mode, color:s.color, patternIds:(s.patternIds||[]).slice() }))
     };
     render();
   },
@@ -2129,7 +2675,7 @@ const A = {
   /* ----- 設定 ----- */
   openSettings(){
     openModal(`${mdlHead("設定")}
-      <p class="small muted">シフト作成システム 営業デモ版 v1.5<br>
+      <p class="small muted">シフト作成システム 営業デモ版 v1.6<br>
       データはこの端末のブラウザ内（localStorage）にのみ保存されます。サーバー送信はありません。</p>
       <div class="opt-grid">
         <button class="btn btn-lg btn-danger" onclick="A.confirmReset()">🔄 デモデータにリセット</button>
@@ -2156,12 +2702,20 @@ window.A = A;
 
 /* ---------------- boot ---------------- */
 state = loadState();
+try{ OLD_VIEW_KEYS.forEach(k => localStorage.removeItem(k)); }catch(e){}
 try{
   const v = localStorage.getItem(VIEW_KEY);
   view = v ? JSON.parse(v) : null;
-  // 参照切れ(リセット直後等)の防御
-  if(view && view.role === "staff" && !userOf(view.userId)) view = null;
-  if(view && view.role === "manager" && !storeOf(view.storeId)) view = null;
+  // 参照切れ(リセット直後・退職・ロールや所属の変更後)の防御。
+  // 所属店舗が必要な画面(店長/スタッフ)なのに店舗が無い場合も視点選択に戻す
+  const vu = view ? userOf(view.userId) : null;
+  if(view && (!vu || retired(vu))) view = null;
+  if(view){
+    const md = uiModeOf(vu);
+    if((md === "manager" || md === "staff") && !storeOf(vu.storeId)) view = null;
+  }
+  // 無効になった視点は端末からも消す(残しておくと壊れた値が localStorage に居座り続ける)
+  if(!view && v) saveView();
 }catch(e){ view = null; }
 // ブラウザのメニューやCtrl+Pから印刷された場合も出力日時を最新にする
 window.addEventListener("beforeprint", stampNow);
