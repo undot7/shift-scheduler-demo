@@ -190,6 +190,11 @@
   /* 扶養の超過見込み。給与情報なので紙には出さない(印刷時は非表示) */
   .fw{display:block; color:#c0392b; font-weight:700; font-size:9px; line-height:1.2;}
   .fw-chip{background:#fdeaea; color:#c0392b; font-size:11px; font-weight:700; border-radius:999px; padding:3px 9px;}
+  /* 公休が設定より多くなっている人の警告帯(店長向け・紙には出さない) */
+  .off-over-bar{
+    background:#fff6e5; color:#a4690f; border:1px solid #f0d9a8; border-radius:10px;
+    padding:7px 10px; margin-bottom:8px; font-size:12px; font-weight:700; line-height:1.5;
+  }
   table.grid .name-col.clk{cursor:pointer;}
   table.grid .name-col.clk:hover{background:#f5f8ff;}
   .name-col .gear{display:block; color:var(--muted); font-size:9px;}
@@ -421,8 +426,11 @@
 //      (旧v4のstateをそのまま読むと、シード済みの今月分が古い時刻のまま残り人員不足バッジが出る)
 //  v6: ロール定義(state.roles)・スタッフの在籍期間(users[].joinDate/leaveDate)・
 //      店舗の無効化(stores[].archived)を追加
-const STATE_KEY = "ssd:state:v6";
-const OLD_STATE_KEYS = ["ssd:state:v1", "ssd:state:v2", "ssd:state:v3", "ssd:state:v4", "ssd:state:v5"];   // 残っていても使わないので掃除する
+//  v7: 自動生成に「公休日数の下限まで埋める」工程を追加し、月の公休日数を月別に上書きできるようにした
+//      (旧v6のstateをそのまま読むと、シード済みの今月分が旧ロジックのままで公休が多く、
+//       グリッド上部に「公休が設定より多い」の警告帯が出続ける)
+const STATE_KEY = "ssd:state:v7";
+const OLD_STATE_KEYS = ["ssd:state:v1", "ssd:state:v2", "ssd:state:v3", "ssd:state:v4", "ssd:state:v5", "ssd:state:v6"];   // 残っていても使わないので掃除する
 // v2: view を {userId} に一本化(画面はロールの権限から導出する)。旧v1の形式は読めないので捨てる
 const VIEW_KEY  = "ssd:view:v2";
 const OLD_VIEW_KEYS = ["ssd:view:v1"];
@@ -482,7 +490,7 @@ function seedState(){
     return u;
   });
   const s = {
-    version: 6, seq: 1000,
+    version: 7, seq: 1000,
     tenant: DEMO_DATA.tenant,
     stores: JSON.parse(JSON.stringify(DEMO_DATA.stores)),
     patterns: JSON.parse(JSON.stringify(DEMO_DATA.patterns)),
@@ -523,7 +531,7 @@ function loadState(){
     const raw = localStorage.getItem(STATE_KEY);
     if(raw){
       const s = JSON.parse(raw);
-      if(s && s.version === 6) return s;
+      if(s && s.version === 7) return s;
     }
   }catch(e){ console.error("state load failed, reseeding", e); }
   const s = seedState();
@@ -750,6 +758,78 @@ function patternTargets(pats, ratio){
   return out;
 }
 
+/* ---------------- 月別の条件(既定値＋月ごとの上書き) ----------------
+   上書きは conditions[storeId].monthly = { "YYYY-MM": { monthlyDaysOff: 9 } } の形で持つ。
+   将来ほかの条件(最大連勤など)を月別化しても構造を変えずに足せるよう、キーで引く形にする
+   -------------------------------------------------------------------- */
+function condValueIn(st8, storeId, y, m, key){
+  const c = (st8.conditions && st8.conditions[storeId]) || {};
+  const ov = (c.monthly || {})[ymKey(y, m)];
+  if(ov && ov[key] != null) return ov[key];
+  return c[key] != null ? c[key] : null;
+}
+// その月に上書きが設定されているか(UIの表示切替に使う。値の解決には使わない)
+function hasMonthlyOverride(st8, storeId, y, m, key){
+  const c = (st8.conditions && st8.conditions[storeId]) || {};
+  const ov = (c.monthly || {})[ymKey(y, m)];
+  return !!(ov && ov[key] != null);
+}
+const monthlyDaysOffIn = (st8, storeId, y, m) => condValueIn(st8, storeId, y, m, "monthlyDaysOff");
+
+/* ---------------- 目標勤務日数(公休日数の上限=下限) ----------------
+   中途入社・退職の月は在籍日数で按分する(月日数のままだと必ず公休超過と誤判定される)
+   ------------------------------------------------------------------- */
+// その月の在籍日数(1日ずつ activeOn で数える。在籍期間が未設定の人は月日数と一致する)
+function activeDaysIn(u, y, m){
+  const n = dim(y, m); let c = 0;
+  for(let d = 1; d <= n; d++) if(activeOn(u, dstr(y, m, d))) c++;
+  return c;
+}
+// その月の勤務日数。★店舗で絞らない。在籍日数を店舗をまたいだ暦日で数えている以上、
+//  勤務日数も同じ土俵で数えないと、転属した月に「公休が21日多い」のような正反対の値になる。
+//  1人1日1コマは canAssign の「既に割当済み」判定(dates は全店舗)と shiftAt(user+date)で
+//  構造的に保証されているため、店舗をまたいで数えても二重計上は起きない
+function monthWorkedIn(st8, u, y, m){
+  const ym = ymKey(y, m);
+  return st8.shifts.filter(s => s.userId === u.id && ymOf(s.date) === ym).length;
+}
+// その人のその月の「目標勤務日数」。自動生成の上限かつ下限として使う。
+//   目標勤務日数 = 在籍日数 − 按分した公休日数(四捨五入) − 有給日数
+//   有給は公休日数に含めない(有給を取るほど公休が減る形にしない)ので、勤務可能日数から引く
+//   有給も★店舗で絞らない(勤務日数と同じ土俵にそろえる)
+function workTargetIn(st8, u, storeId, y, m){
+  const base = monthlyDaysOffIn(st8, storeId, y, m);
+  if(base == null) return null;
+  const n  = dim(y, m), ym = ymKey(y, m);
+  const ad = activeDaysIn(u, y, m);
+  const lv = st8.requests.filter(r => r.userId === u.id
+    && r.type === "paid_leave" && ymOf(r.date) === ym && activeOn(u, r.date)).length;
+  return Math.max(0, ad - Math.round(base * ad / n) - lv);
+}
+
+// 公休日数の下限充足の対象＝週の勤務日数の上限(weeklyMaxDays)を持たない雇用形態。
+// パート・学生は weeklyMaxDays で勤務日数が決まるため対象外。
+// ロール(u.role)では判定しない: ロールはクライアントが自由に追加できる階層になったため、
+// ロール基準だと「副店長を作った瞬間に対象から外れる」が起きる
+const FILL_TARGET_TYPES = ["社員", "店長"];
+const isFillTarget = u => FILL_TARGET_TYPES.includes(u.type);
+
+// その月に「公休が設定より多い」人(対象＝社員・店長)。
+// 生成で埋めきれなかった分と、手動でシフトを削除した分の両方がここに出る。
+// 勤務日数は★全店舗で数える。店舗で絞ると、転属した月に
+// 「公休が21日多い」のような事実と正反対の警告が出る
+function daysOffOverIn(storeId, y, m){
+  return membersFor(storeId, y, m)
+    .filter(u => u.storeId === storeId && activeInMonth(u, y, m) && isFillTarget(u))
+    .map(u => {
+      const t = workTargetIn(state, u, storeId, y, m);
+      if(t == null) return null;
+      const n = monthWorkedIn(state, u, y, m);
+      return (t - n) > 0 ? { u: u, over: t - n } : null;
+    })
+    .filter(Boolean);
+}
+
 /* =====================================================================
    自動生成(§6 貪欲法・決定的)
    ※商談演出用の簡易版。本実装では別指示書のアルゴリズムに置き換える。
@@ -775,15 +855,13 @@ function generateForMonth(st8, storeId, y, m){
   const reqsByDate = {};
   st8.requests.forEach(r => { if(r.storeId === storeId){ (reqsByDate[r.date] = reqsByDate[r.date] || []).push(r); } });
 
-  // 有給の日は「月の公休日数」に含めない(有給を取るほど公休が減る形にしない)。
-  // 公休をmonthlyDaysOff日そのまま確保するため、有給日数のぶん勤務可能日数を減らす
-  const leaveDays = {};
-  st8.requests.forEach(r => {
-    if(r.storeId === storeId && r.type === "paid_leave" && ymOf(r.date) === ym)
-      leaveDays[r.userId] = (leaveDays[r.userId] || 0) + 1;
-  });
-  const maxWorkFor = uid => cond.monthlyDaysOff != null
-    ? nDays - cond.monthlyDaysOff - (leaveDays[uid] || 0) : null;
+  // その人のその月の「目標勤務日数」= 在籍日数 − 按分した公休日数 − 有給日数。
+  //  ・上限(これ以上働かせない)と下限(これ以上休ませない)の両方に同じ値を使う
+  //  ・有給の日は「月の公休日数」に含めない(有給を取るほど公休が減る形にしない)
+  //  ・中途入社・退職の月は在籍日数で按分する(月日数のままだと必ず公休超過になるため)
+  //  ・月の公休日数は「既定値＋その月の上書き」で解決する(monthlyDaysOffIn)
+  const workTarget = {};   // uid -> 目標勤務日数(公休日数が未設定の店舗は null)
+  mem.forEach(u => { workTarget[u.id] = workTargetIn(st8, u, storeId, y, m); });
 
   const monthCount = uid => { let c = 0; dates.get(uid).forEach(d => { if(ymOf(d) === ym) c++; }); return c; };
   const weekCount = (uid, ds) => {
@@ -816,7 +894,7 @@ function generateForMonth(st8, storeId, y, m){
     if(forRequest) return true;
     if(u.availableDays && !u.availableDays.includes(DOWK[parseD(ds).getDay()])) return false;
     if(u.weeklyMaxDays != null && weekCount(u.id, ds) >= u.weeklyMaxDays) return false;
-    const mw = maxWorkFor(u.id);
+    const mw = workTarget[u.id];
     if(mw != null && monthCount(u.id) >= mw) return false;
     if(cond.maxConsecutive != null && runLen(u.id, ds) > cond.maxConsecutive) return false;
     return true;
@@ -922,6 +1000,55 @@ function generateForMonth(st8, storeId, y, m){
       }
     }
   }
+
+  /* (4) 目標勤務日数の下限まで埋める(対象＝社員・店長・必要人数を超えて入れてよい)
+     日毎の貪欲埋め(2)は「必要人数まで」で止まるため、必要人数が少ない月は
+     枠が余った人がそのまま公休になる。ここでその不足分を埋める。
+     絶対条件(希望休・有給・在籍期間・既に割当済み)・出勤可能曜日・週上限・
+     月の上限・最大連勤(月またぎを含む)は canAssign() がそのまま守る。
+     守れる範囲でしか埋めない。届かなかった分はグリッド上部の警告帯で知らせる */
+  const fillBands = (store.mode === "free")
+    ? (cond.hourlyHeadcount || []).filter(b => b.from && b.to && b.count > 0) : [];
+  const fillOpen  = fillBands.length ? Math.min(...fillBands.map(b => tm(b.from))) : tm("10:00");
+  const fillClose = fillBands.length ? Math.max(...fillBands.map(b => tm(b.to)))   : 1440;
+  // 追加する1コマの中身。パターン制は比率が最も不足しているパターン、
+  // 自由時間制は雇用形態の既定(実働＋休憩)の長さで開店時刻から
+  const putFill = (u, ds) => {
+    const p = (store.mode === "pattern" && pats.length) ? pickPattern() : null;
+    if(p){ put(u, ds, p.start, p.end, p.id); patCount[p.id]++; return; }
+    const span  = spanOf(u);
+    const floor = Math.min(floorOf(u), span);
+    let we = Math.min(fillClose, fillOpen + span);
+    if(we - fillOpen < floor) we = Math.min(1440, fillOpen + floor);
+    put(u, ds, mt(fillOpen), mt(we));
+  };
+  // monthCount は dates(全期間・全店舗)を数えるので、転属した月も正しく合算される
+  const shortOf = u => (workTarget[u.id] == null) ? 0
+    : Math.max(0, workTarget[u.id] - monthCount(u.id));
+  let pool = mem.filter(isFillTarget).slice().sort((a,b) => a.id - b.id);
+  // 上限の根拠: 追加できるコマ数は最大でも「対象者数 × 月日数」、pool からの脱落は最大で対象者数。
+  //  スタッフ数はマスタ管理で無制限に増やせるため、固定値ではなく人数から算出する
+  const fguardMax = mem.length * (nDays + 1) + 1;
+  let fguard = 0;
+  while(pool.length && fguard++ < fguardMax){
+    // 不足が最も大きい人から1コマずつ(同数なら id 昇順)＝乱数を使わない決定的な選び方
+    const u = pool.filter(x => shortOf(x) > 0)
+      .sort((a,b) => (shortOf(b) - shortOf(a)) || (a.id - b.id))[0];
+    if(!u) break;
+    // 入れる日は「その日の割当人数が最も少ない日」(同数なら日付昇順)。
+    // 特定の日に人が固まって必要人数を大きく超えるのを避ける
+    let bestDs = null, bestN = Infinity;
+    for(let d = 1; d <= nDays; d++){
+      const ds = dstr(y, m, d);
+      if(!canAssign(u, ds)) continue;
+      const n = mem.reduce((a, x) => a + (dates.get(x.id).has(ds) ? 1 : 0), 0);
+      if(n < bestN){ bestN = n; bestDs = ds; }
+    }
+    // どの日にも入れられない＝制約を破らない限りこれ以上埋められない。この人は諦める(警告帯に出る)
+    if(bestDs == null){ pool = pool.filter(x => x.id !== u.id); continue; }
+    putFill(u, bestDs);
+  }
+
   // この月は「シフト表を作成した」と明示的に記録する(割当のない日=公休 と表示してよい月)
   st8.createdMonths[storeId + ":" + ym] = true;
   return created;
@@ -1359,9 +1486,26 @@ function managerHtml(storeId, fromOwner, ro){
 
   // 扶養(給与情報)は閲覧権限のある段のロールにだけ出す
   const overN = vcan("wage") ? fuyouOverMembers(storeId, y, m).length : 0;
+  // 公休が設定より多くなっている人(社員・店長)を1行で知らせる。
+  // 生成で埋めきれなかった分と、手動でシフトを削除した分の両方がここに出る。
+  // 描画のたびに計算する(生成時だけだと手動編集の結果と食い違う)。
+  // ※この定義は必ず ro(スタッフの店舗全体ビュー)の早期 return より後に置くこと
+  const overs = made ? daysOffOverIn(storeId, y, m) : [];
+  const overBar = overs.length ? `<div class="off-over-bar no-print">⚠ 公休が設定より多い: ${
+      overs.slice(0, 5).map(o => `${esc(o.u.name)}(+${o.over})`).join(" ")
+    }${overs.length > 5 ? ` ほか${overs.length - 5}名` : ""}</div>` : "";
   const backBtn = fromOwner ? `<button class="btn btn-sm" onclick="A.ownerBack()">‹ ダッシュボード</button>` : "";
   // 来月のみ操作可・無効化した店舗はシフトを作らない。公開は publish 権限のある段だけ
   const canOp = ui.mgrMonthOffset === 1 && !st.archived;
+  // いま表示している月の公休日数。ここから直接その月だけを変えられる。
+  // 表示条件は自動生成と同じ canOp にそろえる:
+  //  「変更しても、その画面で作り直せない月」では変更させない
+  const offNow = monthlyDaysOffIn(state, storeId, y, m);
+  const offOvr = hasMonthlyOverride(state, storeId, y, m, "monthlyDaysOff");
+  const offBtn = canOp
+    ? `<button class="btn btn-sm" onclick="A.openMonthDaysOff(${storeId})">公休 ${
+        offNow == null ? "未設定" : offNow + "日"}${offOvr ? "（この月のみ）" : ""}</button>`
+    : "";
   const nextBtns =
     (canOp ? `<button class="btn" onclick="A.generate(${storeId})">✨ 自動生成</button>\n       ` : "")
     + ((canOp && vcan("publish")) ? `<button class="btn btn-primary" onclick="A.publish(${storeId})">📢 シフトを公開</button>` : "");
@@ -1390,12 +1534,14 @@ function managerHtml(storeId, fromOwner, ro){
     </div>
     <span style="font-weight:700;">${y}年${m+1}月</span>
     ${stChip}
+    ${offBtn}
     <span class="small muted">希望 ${reqCount}件</span>
     <span style="flex:1"></span>
     <button class="btn btn-sm" onclick="A.printSheet()">🖨 印刷</button>
     <button class="btn btn-sm" onclick="A.exportCsv(${storeId})">⬇ CSVダウンロード</button>
     ${nextBtns}
   </div>
+  ${overBar}
   ${gridHtml}
   <p class="small muted no-print" style="margin-top:8px;">
     セルをタップして手動入力・編集できます（スタッフ名をタップすると<b>個人設定</b>）。点線の枠は下書き（未公開）です。
@@ -1435,6 +1581,39 @@ function condHtml(storeId, fromOwner){
     modeArea = `<h2 class="sec">時間帯別 必要人数</h2>${rows}
       <button class="btn btn-sm" onclick="A.bandAdd()">＋ 時間帯を追加</button>`;
   }
+  /* 月別の公休日数(上書き)。設定できるのは来月以降だけ */
+  const [ny1, nm1] = monthAt(1);
+  const nextYm = ymKey(ny1, nm1);
+  const movr  = c.monthly || {};
+  const movrKeys = Object.keys(movr)
+    .filter(k => movr[k] && movr[k].monthlyDaysOff != null).sort();
+  const movrRows = movrKeys.map(k => {
+    const ay = Number(k.slice(0,4)), am = Number(k.slice(5,7)) - 1;
+    const locked = k < nextYm;   // 当月・過去月。値は使い続けるが変更はさせない
+    return `<div class="frow${locked ? " ms-off" : ""}">
+      <label>${ay}年${am+1}月</label>
+      <input type="number" min="0" max="${dim(ay, am)}" value="${movr[k].monthlyDaysOff}"
+        ${locked ? "disabled" : `onchange="A.monthOffField('${k}', this.value)"`}> 日
+      ${locked ? `<span class="small muted">当月・過去月のため変更できません</span>`
+               : `<button class="btn btn-sm btn-danger" onclick="A.monthOffDel('${k}')">✕</button>`}
+    </div>`;
+  }).join("");
+  // 追加候補は来月〜12ヶ月先のうち、まだ上書きが無い月
+  let movrOpts = "";
+  for(let i = 1; i <= 12; i++){
+    const [ay, am] = monthAt(i); const k = ymKey(ay, am);
+    if(movrKeys.includes(k)) continue;
+    movrOpts += `<option value="${k}">${ay}年${am+1}月</option>`;
+  }
+  const movrArea = `<h2 class="sec">月別の公休日数（上書き）</h2>
+    <p class="small muted" style="margin:0 0 8px;">設定した月だけ、上の「月の公休日数」より<b>優先</b>されます。
+    設定していない月は上の既定値が使われます。<b>来月以降だけ</b>設定できます
+    （シフト表を作り直せるのが来月だけのため）。
+    変更しても自動的に作り直しはしません（「✨ 自動生成」を押し直すと反映されます）。</p>
+    ${movrRows || `<p class="small muted" style="margin:0 0 8px;">月別の上書きはありません。</p>`}
+    ${movrOpts ? `<div class="frow">
+      <select class="tsel" id="cd-movr-add">${movrOpts}</select>
+      <button class="btn btn-sm" onclick="A.monthOffAdd()">＋ 月を追加</button></div>` : ""}`;
   return `<div class="mgr-toolbar">
     <button class="btn btn-sm" onclick="A.mgrGrid()">‹ シフト表へ戻る</button>
     <span style="font-weight:700;">${esc(st.name)}｜条件設定</span>
@@ -1445,6 +1624,7 @@ function condHtml(storeId, fromOwner){
     ${numRow("平日の必要人数", "weekdayHeadcount")}
     ${numRow("土日の必要人数", "weekendHeadcount")}
     ${modeArea}
+    ${movrArea}
     <div style="margin-top:14px;"><button class="btn btn-primary" onclick="A.saveConditions(${storeId})">保存する</button></div>
   </div>`;
 }
@@ -1882,15 +2062,122 @@ const A = {
     render();
   },
   bandDel(i){ ui.condDraft.hourlyHeadcount.splice(i, 1); render(); },
+  // 月別の公休日数(上書き)。ドラフト(ui.condDraft)に持ち、保存は saveConditions が丸ごと行う。
+  // 設定できるのは来月以降だけ
+  monthOffField(ym, val){
+    ui.condDraft.monthly = ui.condDraft.monthly || {};
+    ui.condDraft.monthly[ym] = ui.condDraft.monthly[ym] || {};
+    ui.condDraft.monthly[ym].monthlyDaysOff = val === "" ? null : Number(val);
+  },
+  monthOffAdd(){
+    const el = document.getElementById("cd-movr-add");
+    const ym = el ? el.value : "";
+    if(!ym){ toast("追加できる月がありません"); return; }
+    const [ny1, nm1] = monthAt(1);
+    if(ym < ymKey(ny1, nm1)){ toast("公休日数を変更できるのは来月以降だけです"); return; }
+    ui.condDraft.monthly = ui.condDraft.monthly || {};
+    ui.condDraft.monthly[ym] = ui.condDraft.monthly[ym] || {};
+    if(ui.condDraft.monthly[ym].monthlyDaysOff == null)
+      ui.condDraft.monthly[ym].monthlyDaysOff =
+        ui.condDraft.monthlyDaysOff != null ? ui.condDraft.monthlyDaysOff : 8;
+    render();
+  },
+  monthOffDel(ym){
+    const [ny1, nm1] = monthAt(1);
+    if(ym < ymKey(ny1, nm1)){ toast("公休日数を変更できるのは来月以降だけです"); return; }
+    const mo = ui.condDraft.monthly;
+    if(mo && mo[ym]){
+      delete mo[ym].monthlyDaysOff;
+      if(!Object.keys(mo[ym]).length) delete mo[ym];
+    }
+    render();
+  },
   saveConditions(storeId){
     const bands = ui.condDraft.hourlyHeadcount || [];
     if(bands.some(b => tm(b.from) >= tm(b.to))){
       toast("時間帯の開始は終了より前にしてください"); return;
     }
+    // 既定の「月の公休日数」: 空欄(null)は「設定なし」としてそのまま許す(月別の空欄＝上書き無しと同じ扱い)。
+    // 値が入っているときは 0〜31 の整数のみ。既定値はどの月にも使われるため上限は月の最大日数(31)で見る
+    // (月別の上書きはその月の日数 dim で見る)。負値を通すと目標勤務日数が月の日数を超え、消せない警告帯になる
+    const bd = ui.condDraft.monthlyDaysOff;
+    if(bd != null && (!isFinite(bd) || bd < 0 || bd > 31 || bd !== Math.floor(bd))){
+      toast("月の公休日数は0〜31の整数で入力してください"); return;
+    }
+    // 月別の上書き: 空欄にされた行は保存せず捨てる。値は 0〜その月の日数 の整数のみ
+    const mo = ui.condDraft.monthly || {};
+    for(const k of Object.keys(mo)){
+      const v = mo[k] ? mo[k].monthlyDaysOff : null;
+      if(v == null || v === ""){
+        delete mo[k].monthlyDaysOff;
+        if(!Object.keys(mo[k]).length) delete mo[k];
+        continue;
+      }
+      const ay = Number(k.slice(0,4)), am = Number(k.slice(5,7)) - 1;
+      const nd = dim(ay, am);
+      if(!isFinite(v) || v < 0 || v > nd || v !== Math.floor(v)){
+        toast(`${ay}年${am+1}月の公休日数は0〜${nd}の整数で入力してください`); return;
+      }
+    }
+    if(!Object.keys(mo).length) delete ui.condDraft.monthly;
     state.conditions[storeId] = JSON.parse(JSON.stringify(ui.condDraft));
     saveState();
     ui.mgrScreen = "grid"; ui.condDraft = null;
     render(); toast("条件を保存しました");
+  },
+
+  // その月だけの公休日数。条件設定のドラフト方式ではなく即時保存(マスタ管理と同じ)。
+  // 設定できるのは来月以降だけ
+  openMonthDaysOff(storeId){
+    const [y, m] = monthAt(ui.mgrMonthOffset);
+    const [ny1, nm1] = monthAt(1);
+    if(ymKey(y, m) < ymKey(ny1, nm1)){ toast("公休日数を変更できるのは来月以降だけです"); return; }
+    const c    = state.conditions[storeId] || {};
+    const base = c.monthlyDaysOff;
+    const cur  = monthlyDaysOffIn(state, storeId, y, m);
+    const ovr  = hasMonthlyOverride(state, storeId, y, m, "monthlyDaysOff");
+    const baseLabel = base == null ? "未設定" : base + "日";
+    openModal(`${mdlHead(`${y}年${m+1}月の公休日数`)}
+      <p class="small muted">この月だけの公休日数を設定します。ほかの月は「⚙ 条件設定」の
+      <b>月の公休日数</b>（既定 ${baseLabel}）が使われます。<br>
+      変更しても自動的に作り直しはしません。<b>「✨ 自動生成」を押し直す</b>と反映されます。</p>
+      <div class="frow"><label>この月の公休日数</label>
+        <input type="number" id="md-off" min="0" max="${dim(y, m)}" value="${cur == null ? "" : cur}"> 日</div>
+      <button class="btn btn-lg btn-primary" onclick="A.saveMonthDaysOff(${storeId})">この月だけ保存する</button>
+      ${ovr ? `<button class="btn btn-lg" style="margin-top:8px;" onclick="A.clearMonthDaysOff(${storeId})">既定（${baseLabel}）に戻す</button>` : ""}`);
+  },
+  saveMonthDaysOff(storeId){
+    const [y, m] = monthAt(ui.mgrMonthOffset);
+    const [ny1, nm1] = monthAt(1);
+    const ym = ymKey(y, m);
+    if(ym < ymKey(ny1, nm1)){ toast("公休日数を変更できるのは来月以降だけです"); return; }
+    const raw = document.getElementById("md-off").value;
+    const n   = Number(raw);
+    const nd  = dim(y, m);
+    if(raw === "" || !isFinite(n) || n < 0 || n > nd || n !== Math.floor(n)){
+      toast(`公休日数は0〜${nd}の整数で入力してください`); return;
+    }
+    const c = state.conditions[storeId] || (state.conditions[storeId] = {});
+    c.monthly = c.monthly || {};
+    c.monthly[ym] = c.monthly[ym] || {};
+    c.monthly[ym].monthlyDaysOff = n;
+    saveState(); closeModal(); render();
+    toast(`${m+1}月の公休日数を${n}日にしました（自動生成し直すと反映されます）`);
+  },
+  clearMonthDaysOff(storeId){
+    const [y, m] = monthAt(ui.mgrMonthOffset);
+    const [ny1, nm1] = monthAt(1);
+    const ym = ymKey(y, m);
+    // 出口側のガード(入口は openMonthDaysOff。既定に戻す操作でも当月・過去月は触らせない)
+    if(ym < ymKey(ny1, nm1)){ toast("公休日数を変更できるのは来月以降だけです"); return; }
+    const c  = state.conditions[storeId] || {};
+    if(c.monthly && c.monthly[ym]){
+      delete c.monthly[ym].monthlyDaysOff;
+      if(!Object.keys(c.monthly[ym]).length) delete c.monthly[ym];
+      if(!Object.keys(c.monthly).length) delete c.monthly;
+    }
+    saveState(); closeModal(); render();
+    toast(`${m+1}月の公休日数を既定に戻しました`);
   },
 
   openCell(storeId, userId, ds){
@@ -2675,7 +2962,7 @@ const A = {
   /* ----- 設定 ----- */
   openSettings(){
     openModal(`${mdlHead("設定")}
-      <p class="small muted">シフト作成システム 営業デモ版 v1.6<br>
+      <p class="small muted">シフト作成システム 営業デモ版 v1.7<br>
       データはこの端末のブラウザ内（localStorage）にのみ保存されます。サーバー送信はありません。</p>
       <div class="opt-grid">
         <button class="btn btn-lg btn-danger" onclick="A.confirmReset()">🔄 デモデータにリセット</button>
